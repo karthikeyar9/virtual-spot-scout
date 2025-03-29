@@ -68,16 +68,14 @@ const StreetView = ({
       viewerRef.current = viewer;
       
       // Set up event listeners with correct event types
-      viewer.on(Mapillary.Viewer.nodechanged, (event) => {
-        console.log("Current image ID:", event.image.id);
+      viewer.on('nodechanged', (event) => {
+        console.log("Current image ID:", event.node.id);
       });
       
-      viewer.on(Mapillary.Viewer.navigable, (event) => {
-        if (event.navigable) {
-          // Loaded and ready
-          setIsLoaded(true);
-          if (onLoad) onLoad();
-        }
+      viewer.on('dataloaded', () => {
+        // Loaded and ready
+        setIsLoaded(true);
+        if (onLoad) onLoad();
       });
       
       // If we have a specific panoId or position, use it
