@@ -60,21 +60,24 @@ const StreetView = ({
         clientId: 'MLY|4761405525255083|3efb317758c3ebe4ec7edeea41a91d54', // Public demo key
         component: {
           cover: false,
-          bearing: { size: "small" },
+          bearing: true,
           zoom: true,
-          sequence: { visible: false },
+          sequence: false,
         }
       });
       
       viewerRef.current = viewer;
       
       // Set up event listeners
-      viewer.on(Mapillary.Viewer.nodechanged, (event) => {
-        console.log("Current image ID:", event.image.id);
+      viewer.on(Mapillary.Viewer.Event.NODE_CHANGED, (event) => {
+        console.log("Current image ID:", event.properties.id);
       });
       
-      viewer.on(Mapillary.Viewer.loadingchanged, (event) => {
-        if (!event.loading) {
+      viewer.on(Mapillary.Viewer.Event.STATE_CHANGED, (event) => {
+        if (event.state === Mapillary.State.TRAVERSING) {
+          // Still loading/moving
+        } else if (event.state === Mapillary.State.WAITING) {
+          // Loaded and ready
           setIsLoaded(true);
           if (onLoad) onLoad();
         }
@@ -88,11 +91,8 @@ const StreetView = ({
           loadRandomLocation(viewer);
         });
       } else if (position) {
-        viewer.moveCloseTo(position.lat, position.lng).catch(e => {
-          console.error("Error moving to position:", e);
-          // Try random location if specific position fails
-          loadRandomLocation(viewer);
-        });
+        // For position-based lookup, we need to use Mapillary API methods
+        lookupImageByPosition(viewer, position.lat, position.lng);
       } else {
         // Load a random street view if no specific location is provided
         loadRandomLocation(viewer);
@@ -100,6 +100,29 @@ const StreetView = ({
     } catch (e) {
       console.error("Error initializing Mapillary:", e);
       setError("Failed to initialize street view. Please try again later.");
+    }
+  };
+
+  const lookupImageByPosition = async (viewer: Mapillary.Viewer, lat: number, lng: number) => {
+    try {
+      // Convert position to Mapillary image ID (nearest image)
+      // Note: This is a simple approach - in production, you'd use Mapillary's API more effectively
+      const response = await fetch(
+        `https://graph.mapillary.com/images?access_token=MLY|4761405525255083|3efb317758c3ebe4ec7edeea41a91d54&fields=id&limit=1&closeto=${lng},${lat}`
+      );
+      
+      const data = await response.json();
+      
+      if (data && data.data && data.data.length > 0) {
+        const imageId = data.data[0].id;
+        await viewer.moveTo(imageId);
+      } else {
+        console.error("No images found near the position");
+        loadRandomLocation(viewer);
+      }
+    } catch (e) {
+      console.error("Error finding image at position:", e);
+      loadRandomLocation(viewer);
     }
   };
 
@@ -130,12 +153,20 @@ const StreetView = ({
       if (panoId) {
         await viewerRef.current.moveTo(panoId);
       } else if (position) {
-        await viewerRef.current.moveCloseTo(position.lat, position.lng);
+        // For position-based updates, we need to use our custom function
+        lookupImageByPosition(viewerRef.current, position.lat, position.lng);
       }
       
       // Update camera position
-      viewerRef.current.setBearing(heading);
-      viewerRef.current.setFieldOfView(calculateFov(zoom));
+      // Note: Mapillary doesn't directly support setBearing but can control camera
+      const camera = viewerRef.current.getComponent("camera");
+      if (camera) {
+        // Set bearing (heading)
+        viewerRef.current.moveDir(heading);
+        
+        // Zoom level conversion - apply field of view
+        viewerRef.current.setFieldOfView(calculateFov(zoom));
+      }
     } catch (e) {
       console.error("Error updating Mapillary view:", e);
     }
