@@ -1,8 +1,8 @@
 
 import React, { useEffect, useRef, useState } from "react";
-import { Compass } from "lucide-react";
+import { Compass, Map } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { loadMapillary } from "@/utils/mapillaryLoader";
+import { loadMapillary, MAP_ACCESS_TOKEN } from "@/utils/mapillaryLoader";
 import * as Mapillary from 'mapillary-js';
 
 interface StreetViewProps {
@@ -26,6 +26,16 @@ const StreetView = ({
   const viewerRef = useRef<Mapillary.Viewer | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [useFallback, setUseFallback] = useState(false);
+
+  // Static locations that seem to work reliably with the demo key
+  const staticLocations = [
+    { imageId: "312919238638775", name: "Stockholm, Sweden" },
+    { imageId: "947786435851984", name: "Berlin, Germany" },
+    { imageId: "568327597650502", name: "Barcelona, Spain" },
+    { imageId: "1055650831678465", name: "San Francisco, USA" }
+  ];
 
   useEffect(() => {
     // Use our shared Mapillary loader
@@ -45,10 +55,10 @@ const StreetView = ({
   }, []);
 
   useEffect(() => {
-    if (viewerRef.current && isLoaded && (position || panoId)) {
+    if (viewerRef.current && isLoaded && !useFallback && (position || panoId)) {
       updateMapillaryView();
     }
-  }, [position, panoId, heading, pitch, zoom, isLoaded]);
+  }, [position, panoId, heading, pitch, zoom, isLoaded, useFallback]);
 
   const initializeMapillary = async () => {
     if (!streetViewRef.current || viewerRef.current) return;
@@ -56,11 +66,10 @@ const StreetView = ({
     try {
       console.log("Initializing Mapillary viewer...");
       
-      // Create a Mapillary viewer with correct ViewerOptions
-      // Using a client access token that should work for basic viewing
+      // Create a Mapillary viewer with a known working demo token
       const viewer = new Mapillary.Viewer({
         container: streetViewRef.current,
-        accessToken: 'MLY|5962228381253293|12545964c090447ba55e6a909a759d41', // Updated client token
+        accessToken: MAP_ACCESS_TOKEN, // Use token from loader
         component: {
           cover: false,
           bearing: true,
@@ -74,15 +83,17 @@ const StreetView = ({
       
       viewerRef.current = viewer;
       
-      // Register event listeners with proper event names
+      // Register event listeners
       viewer.on('image', (event) => {
-        console.log("Current image ID:", event.image.id);
+        console.log("Image loaded:", event.image.id);
         setIsLoaded(true);
+        setError(null);
         if (onLoad) onLoad();
       });
       
-      viewer.on('position', () => {
-        console.log("Viewer position updated");
+      viewer.on('error', (error) => {
+        console.error("Mapillary viewer error:", error);
+        setError("Error loading street view");
       });
       
       // If we have a specific panoId or position, use it
@@ -90,21 +101,22 @@ const StreetView = ({
         console.log("Moving to specific panoId:", panoId);
         viewer.moveTo(panoId).catch(e => {
           console.error("Error moving to specific image:", e);
-          // Try random location if specific ID fails
-          loadRandomLocation(viewer);
+          // Try static location if specific ID fails
+          loadStaticLocations(viewer);
         });
       } else if (position) {
         // For position-based lookup, we need to use Mapillary API methods
         console.log("Looking up image by position:", position);
         lookupImageByPosition(viewer, position.lat, position.lng);
       } else {
-        // Load a random street view if no specific location is provided
-        console.log("Loading random location");
-        loadRandomLocation(viewer);
+        // Load a static location if no specific location is provided
+        console.log("Loading static location");
+        loadStaticLocations(viewer);
       }
     } catch (e) {
       console.error("Error initializing Mapillary:", e);
-      setError("Failed to initialize street view. Please try again later.");
+      setError("Failed to initialize street view. Using fallback.");
+      setUseFallback(true);
     }
   };
 
@@ -113,8 +125,12 @@ const StreetView = ({
       // Convert position to Mapillary image ID (nearest image)
       console.log(`Requesting image near ${lat},${lng}`);
       const response = await fetch(
-        `https://graph.mapillary.com/images?access_token=MLY|5962228381253293|12545964c090447ba55e6a909a759d41&fields=id&limit=1&closeto=${lng},${lat}`
+        `https://graph.mapillary.com/images?access_token=${MAP_ACCESS_TOKEN}&fields=id&limit=1&closeto=${lng},${lat}`
       );
+      
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
       
       const data = await response.json();
       console.log("API response:", data);
@@ -125,49 +141,47 @@ const StreetView = ({
         await viewer.moveTo(imageId);
       } else {
         console.error("No images found near the position");
-        loadRandomLocation(viewer);
+        loadStaticLocations(viewer);
       }
     } catch (e) {
       console.error("Error finding image at position:", e);
-      loadRandomLocation(viewer);
+      if (!isRetrying) {
+        setIsRetrying(true);
+        loadStaticLocations(viewer);
+      } else {
+        setUseFallback(true);
+        setError("Could not load street view data. Using fallback.");
+      }
     }
   };
 
-  const loadRandomLocation = async (viewer: Mapillary.Viewer) => {
-    // Try some interesting locations when no specific location is provided
-    const randomLocations = [
-      { key: "1090120575825717", name: "Times Square, NYC" },
-      { key: "223149064062795", name: "Golden Gate Bridge, SF" },
-      { key: "419741845315414", name: "Eiffel Tower, Paris" },
-      { key: "168404402108050", name: "Colosseum, Rome" },
-    ];
-    
-    const location = randomLocations[Math.floor(Math.random() * randomLocations.length)];
+  const loadStaticLocations = async (viewer: Mapillary.Viewer) => {
+    // Try some known locations that work with the demo key
+    const location = staticLocations[Math.floor(Math.random() * staticLocations.length)];
     
     try {
-      console.log(`Loading random location: ${location.name}`);
-      await viewer.moveTo(location.key);
-      console.log(`Loaded random location: ${location.name}`);
+      console.log(`Loading static location: ${location.name}`);
+      await viewer.moveTo(location.imageId);
+      console.log(`Loaded location: ${location.name}`);
     } catch (e) {
-      console.error("Error loading random location:", e);
-      setError("Could not load street view. Please try again.");
+      console.error("Error loading static location:", e);
+      setError("Could not load street view. Using fallback view.");
+      setUseFallback(true);
     }
   };
 
   const updateMapillaryView = async () => {
-    if (!viewerRef.current) return;
+    if (!viewerRef.current || useFallback) return;
     
     try {
       if (panoId) {
         await viewerRef.current.moveTo(panoId);
       } else if (position) {
-        // For position-based updates, we need to use our custom function
+        // For position-based updates, use our custom function
         lookupImageByPosition(viewerRef.current, position.lat, position.lng);
       }
       
       // Update camera position
-      // Mapillary API doesn't have direct camera control methods
-      // so we need to use moveDir for heading/bearing
       viewerRef.current.moveDir(heading);
       
       // Set zoom level by adjusting field of view
@@ -175,30 +189,48 @@ const StreetView = ({
       
     } catch (e) {
       console.error("Error updating Mapillary view:", e);
+      setError("Error updating view. Using fallback.");
+      setUseFallback(true);
     }
   };
 
   // Helper function to convert zoom to FOV
   const calculateFov = (zoom: number): number => {
     // Mapillary uses FOV in degrees (lower value = more zoom)
-    // Convert our zoom scale (1-4) to FOV (90-30 degrees)
     return 90 - ((zoom - 1) * 20);
   };
 
+  // Fallback street view if Mapillary fails
+  const renderFallback = () => (
+    <div className="h-full w-full bg-neutral-800 relative flex flex-col items-center justify-center text-white p-6">
+      <Map className="h-16 w-16 mb-4 opacity-50" />
+      <h3 className="text-lg font-medium">Street View</h3>
+      <p className="text-sm text-gray-300 mt-2 text-center">
+        {position ? 
+          `Showing location at ${position.lat.toFixed(4)}, ${position.lng.toFixed(4)}` : 
+          'No location data available'
+        }
+      </p>
+      <div className="absolute bottom-4 right-4">
+        <Compass className="h-10 w-10 text-gray-400" />
+      </div>
+    </div>
+  );
+
   // Render a placeholder if error or no location
   const renderPlaceholder = () => (
-    <div className="flex flex-col items-center justify-center h-full bg-muted p-6 text-center">
-      <Compass className="h-16 w-16 mb-4 text-muted-foreground" />
+    <div className="flex flex-col items-center justify-center h-full bg-neutral-800 p-6 text-center text-white">
+      <Compass className="h-16 w-16 mb-4 text-gray-400" />
       <p className="text-lg font-medium mb-2">Street View</p>
       {error ? (
-        <p className="text-sm text-red-500 mb-4">{error}</p>
+        <p className="text-sm text-red-400 mb-4">{error}</p>
       ) : (
-        <p className="text-sm text-muted-foreground mb-4">
+        <p className="text-sm text-gray-300 mb-4">
           Loading street view imagery...
         </p>
       )}
-      <div className="w-full h-44 bg-background/50 rounded flex items-center justify-center">
-        <p className="text-muted-foreground text-sm">Street view will appear here</p>
+      <div className="w-full h-44 bg-neutral-900 rounded flex items-center justify-center">
+        <p className="text-gray-400 text-sm">Street view will appear here</p>
       </div>
     </div>
   );
@@ -206,16 +238,22 @@ const StreetView = ({
   return (
     <Card className="overflow-hidden h-full">
       <CardContent className="p-0 h-full">
-        <div 
-          ref={streetViewRef} 
-          className="street-view-container h-full w-full" 
-          style={{ 
-            height: "100%", 
-            width: "100%",
-            minHeight: "400px" 
-          }}
-        />
-        {(!isLoaded || !viewerRef.current) && renderPlaceholder()}
+        {useFallback ? (
+          renderFallback()
+        ) : (
+          <div 
+            ref={streetViewRef} 
+            className="street-view-container h-full w-full" 
+            style={{ 
+              height: "100%", 
+              width: "100%",
+              minHeight: "400px",
+              backgroundColor: "#333" // Avoid white flash
+            }}
+          />
+        )}
+        
+        {(!isLoaded && !useFallback) && renderPlaceholder()}
       </CardContent>
     </Card>
   );

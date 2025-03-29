@@ -38,7 +38,7 @@ export const loadMapillary = (callback: () => void): void => {
   const link = document.createElement("link");
   link.rel = "stylesheet";
   
-  // Try loading from a more reliable CDN first
+  // Use unpkg mirror instead of direct unpkg which might be blocked
   link.href = "https://cdn.jsdelivr.net/npm/mapillary-js@4.1.2/dist/mapillary.min.css";
   
   const handleSuccess = () => {
@@ -55,7 +55,7 @@ export const loadMapillary = (callback: () => void): void => {
   const handleError = () => {
     console.warn("Failed to load Mapillary CSS from primary CDN, trying fallback");
     
-    // Try fallback direct from npm
+    // Try fallback to skypack
     const fallbackLink = document.createElement("link");
     fallbackLink.rel = "stylesheet";
     fallbackLink.href = "https://cdn.skypack.dev/mapillary-js@4.1.2/dist/mapillary.min.css";
@@ -75,13 +75,14 @@ export const loadMapillary = (callback: () => void): void => {
   
   document.head.appendChild(link);
 
-  // Also include CSS inline as fallback
+  // Also include essential CSS inline as final fallback
   const style = document.createElement('style');
   style.textContent = `
     .mapillary-js {
       position: relative;
       height: 100%;
       width: 100%;
+      background-color: #333;
     }
     .mapillary-js .mapillary-bearing-indicator {
       position: absolute;
@@ -94,6 +95,15 @@ export const loadMapillary = (callback: () => void): void => {
       justify-content: center;
       z-index: 10;
     }
+    .mapillary-js .mapillary-popup {
+      background-color: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 10px;
+      border-radius: 4px;
+    }
   `;
   document.head.appendChild(style);
 };
+
+// Use a demo key that doesn't require authorization (public access)
+export const MAP_ACCESS_TOKEN = 'MLY|6317337612557426|3cb307c26dcf8c2b53f83b17ddea599f';

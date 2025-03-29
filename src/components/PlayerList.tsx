@@ -19,24 +19,24 @@ const PlayerList = ({ players, currentRound, className }: PlayerListProps) => {
 
   return (
     <Card className={cn("h-full", className)}>
-      <CardHeader className="pb-2 pt-3">
+      <CardHeader className="pb-2 pt-2">
         <CardTitle className="text-lg flex items-center">
           <Users className="mr-2 h-5 w-5" />
           Players ({players.length})
         </CardTitle>
       </CardHeader>
-      <CardContent className="p-0 pb-3">
-        <ScrollArea className="h-[calc(100%-48px)] pr-3">
+      <CardContent className="p-0 pb-2">
+        <ScrollArea className="h-[calc(100%-40px)] pr-3">
           <div className="px-4 pb-1 space-y-2">
             {sortedPlayers.map((player, index) => (
               <div 
                 key={player.id}
                 className={cn(
-                  "flex items-center justify-between p-3 rounded-md transition-colors",
+                  "flex items-center justify-between p-2 rounded-md transition-colors",
                   index === 0 ? "bg-yellow-50 border border-yellow-200" : "bg-background border border-border"
                 )}
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   {index === 0 && (
                     <Trophy className="h-4 w-4 text-yellow-500" />
                   )}
@@ -73,8 +73,8 @@ const PlayerList = ({ players, currentRound, className }: PlayerListProps) => {
             ))}
             
             {players.length === 0 && (
-              <div className="text-center py-8 text-muted-foreground">
-                <Users className="mx-auto h-8 w-8 mb-2 opacity-50" />
+              <div className="text-center py-4 text-muted-foreground">
+                <Users className="mx-auto h-6 w-6 mb-2 opacity-50" />
                 <p>Waiting for players to join...</p>
               </div>
             )}
