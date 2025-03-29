@@ -1,8 +1,8 @@
-
 import React, { useEffect, useRef, useState } from "react";
 import { MapPin } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { loadGoogleMapsApi } from "@/utils/googleMapsLoader";
 
 interface GuessMapProps {
   onGuess?: (lat: number, lng: number) => void;
@@ -16,7 +16,6 @@ interface GuessMapProps {
 declare global {
   interface Window {
     google: any;
-    initGuessMap: () => void;
   }
 }
 
@@ -37,27 +36,17 @@ const GuessMap = ({
 
   // Initialize the map
   useEffect(() => {
-    if (!window.google) {
-      const script = document.createElement("script");
-      script.src = `https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initGuessMap`;
-      script.async = true;
-      script.defer = true;
-      
-      window.initGuessMap = () => {
-        if (mapRef.current) {
-          initializeMap();
-        }
-      };
-      
-      document.head.appendChild(script);
-      
-      return () => {
-        document.head.removeChild(script);
-        delete window.initGuessMap;
-      };
-    } else if (mapRef.current && !mapInstanceRef.current) {
-      initializeMap();
-    }
+    // Use our shared Google Maps loader
+    loadGoogleMapsApi(() => {
+      if (mapRef.current && !mapInstanceRef.current) {
+        initializeMap();
+      }
+    });
+
+    return () => {
+      // Clean up map instance if needed
+      mapInstanceRef.current = null;
+    };
   }, []);
 
   // Update map when props change
@@ -203,7 +192,7 @@ const GuessMap = ({
       <MapPin className="h-16 w-16 mb-4 text-muted-foreground" />
       <p className="text-lg font-medium mb-2">World Map</p>
       <p className="text-sm text-muted-foreground mb-4">
-        Replace "YOUR_API_KEY" in the GuessMap component with a valid Google Maps API key.
+        Please add a valid Google Maps API key to googleMapsLoader.ts
       </p>
       <div className="w-full h-44 bg-background/50 rounded flex items-center justify-center">
         <p className="text-muted-foreground text-sm">Map will appear here</p>

@@ -2,6 +2,7 @@
 import React, { useEffect, useRef } from "react";
 import { Compass } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { loadGoogleMapsApi } from "@/utils/googleMapsLoader";
 
 interface StreetViewProps {
   position?: { lat: number; lng: number };
@@ -15,7 +16,6 @@ interface StreetViewProps {
 declare global {
   interface Window {
     google: any;
-    initStreetView: () => void;
   }
 }
 
@@ -31,28 +31,17 @@ const StreetView = ({
   const streetViewInstanceRef = useRef<any>(null);
 
   useEffect(() => {
-    // Initialize Google Maps API if not already loaded
-    if (!window.google) {
-      const script = document.createElement("script");
-      script.src = `https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initStreetView`;
-      script.async = true;
-      script.defer = true;
-      
-      window.initStreetView = () => {
-        if (streetViewRef.current) {
-          initializeStreetView();
-        }
-      };
-      
-      document.head.appendChild(script);
-      
-      return () => {
-        document.head.removeChild(script);
-        delete window.initStreetView;
-      };
-    } else if (streetViewRef.current) {
-      initializeStreetView();
-    }
+    // Use our shared Google Maps loader
+    loadGoogleMapsApi(() => {
+      if (streetViewRef.current) {
+        initializeStreetView();
+      }
+    });
+
+    return () => {
+      // Clean up street view instance if needed
+      streetViewInstanceRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -123,7 +112,7 @@ const StreetView = ({
       <Compass className="h-16 w-16 mb-4 text-muted-foreground" />
       <p className="text-lg font-medium mb-2">Street View</p>
       <p className="text-sm text-muted-foreground mb-4">
-        Replace "YOUR_API_KEY" in the StreetView component with a valid Google Maps API key.
+        Please add a valid Google Maps API key to googleMapsLoader.ts
       </p>
       <div className="w-full h-44 bg-background/50 rounded flex items-center justify-center">
         <p className="text-muted-foreground text-sm">Street view will appear here</p>
@@ -134,7 +123,6 @@ const StreetView = ({
   return (
     <Card className="overflow-hidden h-full">
       <CardContent className="p-0 h-full">
-        {/* Note: In a production app, you would replace YOUR_API_KEY with an actual API key */}
         {position || panoId ? (
           <div ref={streetViewRef} className="street-view-container h-full" />
         ) : (
