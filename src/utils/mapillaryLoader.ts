@@ -105,5 +105,7 @@ export const loadMapillary = (callback: () => void): void => {
   document.head.appendChild(style);
 };
 
-// Use a demo key that doesn't require authorization (public access)
-export const MAP_ACCESS_TOKEN = 'MLY|6317337612557426|3cb307c26dcf8c2b53f83b17ddea599f';
+// Use a new token from Mapillary examples
+// Changed from the previous token which was causing authorization errors
+export const MAP_ACCESS_TOKEN = 'MLY|4123761936484977|f261edcca0b199cb9a388a918bb8443a';
+
