@@ -54,6 +54,8 @@ const StreetView = ({
     if (!streetViewRef.current || viewerRef.current) return;
     
     try {
+      console.log("Initializing Mapillary viewer...");
+      
       // Create a Mapillary viewer with correct ViewerOptions
       const viewer = new Mapillary.Viewer({
         container: streetViewRef.current,
@@ -71,15 +73,20 @@ const StreetView = ({
       
       viewerRef.current = viewer;
       
-      // Use the correct event names from Mapillary API
+      // Register event listeners with proper event names
       viewer.on('image', (event) => {
         console.log("Current image ID:", event.image.id);
         setIsLoaded(true);
         if (onLoad) onLoad();
       });
       
+      viewer.on('position', () => {
+        console.log("Viewer position updated");
+      });
+      
       // If we have a specific panoId or position, use it
       if (panoId) {
+        console.log("Moving to specific panoId:", panoId);
         viewer.moveTo(panoId).catch(e => {
           console.error("Error moving to specific image:", e);
           // Try random location if specific ID fails
@@ -87,9 +94,11 @@ const StreetView = ({
         });
       } else if (position) {
         // For position-based lookup, we need to use Mapillary API methods
+        console.log("Looking up image by position:", position);
         lookupImageByPosition(viewer, position.lat, position.lng);
       } else {
         // Load a random street view if no specific location is provided
+        console.log("Loading random location");
         loadRandomLocation(viewer);
       }
     } catch (e) {
@@ -101,15 +110,17 @@ const StreetView = ({
   const lookupImageByPosition = async (viewer: Mapillary.Viewer, lat: number, lng: number) => {
     try {
       // Convert position to Mapillary image ID (nearest image)
-      // Note: This is a simple approach - in production, you'd use Mapillary's API more effectively
+      console.log(`Requesting image near ${lat},${lng}`);
       const response = await fetch(
         `https://graph.mapillary.com/images?access_token=MLY|4761405525255083|3efb317758c3ebe4ec7edeea41a91d54&fields=id&limit=1&closeto=${lng},${lat}`
       );
       
       const data = await response.json();
+      console.log("API response:", data);
       
       if (data && data.data && data.data.length > 0) {
         const imageId = data.data[0].id;
+        console.log("Found image ID:", imageId);
         await viewer.moveTo(imageId);
       } else {
         console.error("No images found near the position");
@@ -133,6 +144,7 @@ const StreetView = ({
     const location = randomLocations[Math.floor(Math.random() * randomLocations.length)];
     
     try {
+      console.log(`Loading random location: ${location.name}`);
       await viewer.moveTo(location.key);
       console.log(`Loaded random location: ${location.name}`);
     } catch (e) {
@@ -181,7 +193,7 @@ const StreetView = ({
         <p className="text-sm text-red-500 mb-4">{error}</p>
       ) : (
         <p className="text-sm text-muted-foreground mb-4">
-          Select a location to view street imagery
+          Loading street view imagery...
         </p>
       )}
       <div className="w-full h-44 bg-background/50 rounded flex items-center justify-center">
@@ -193,8 +205,16 @@ const StreetView = ({
   return (
     <Card className="overflow-hidden h-full">
       <CardContent className="p-0 h-full">
-        <div ref={streetViewRef} className="street-view-container h-full" />
-        {(!isLoaded && !viewerRef.current) && renderPlaceholder()}
+        <div 
+          ref={streetViewRef} 
+          className="street-view-container h-full w-full" 
+          style={{ 
+            height: "100%", 
+            width: "100%",
+            minHeight: "400px" 
+          }}
+        />
+        {(!isLoaded || !viewerRef.current) && renderPlaceholder()}
       </CardContent>
     </Card>
   );

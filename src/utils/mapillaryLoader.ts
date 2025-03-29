@@ -7,11 +7,8 @@ declare global {
   }
 }
 
-// No API key is required for basic Mapillary usage
-// but you might want to register for a Mapillary account for better experience
-
 /**
- * Loads the Mapillary CSS once and ensures it's not loaded multiple times
+ * Loads the Mapillary CSS directly from CDN with fallback
  * @param callback Function to call when Mapillary styles are loaded
  */
 export const loadMapillary = (callback: () => void): void => {
@@ -37,11 +34,14 @@ export const loadMapillary = (callback: () => void): void => {
   // Set loading flag
   window.mapillaryLoading = true;
 
-  // Load Mapillary CSS
+  // Inject CSS with reliable CDN URL and handle errors
   const link = document.createElement("link");
   link.rel = "stylesheet";
-  link.href = "https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.min.css";
-  link.onload = () => {
+  
+  // Try loading from a more reliable CDN first
+  link.href = "https://cdn.jsdelivr.net/npm/mapillary-js@4.1.2/dist/mapillary.min.css";
+  
+  const handleSuccess = () => {
     window.mapillaryLoaded = true;
     window.mapillaryLoading = false;
     
@@ -52,5 +52,48 @@ export const loadMapillary = (callback: () => void): void => {
     }
   };
   
+  const handleError = () => {
+    console.warn("Failed to load Mapillary CSS from primary CDN, trying fallback");
+    
+    // Try fallback direct from npm
+    const fallbackLink = document.createElement("link");
+    fallbackLink.rel = "stylesheet";
+    fallbackLink.href = "https://cdn.skypack.dev/mapillary-js@4.1.2/dist/mapillary.min.css";
+    
+    fallbackLink.onload = handleSuccess;
+    fallbackLink.onerror = () => {
+      console.error("Failed to load Mapillary CSS from all sources");
+      // Still call callbacks to not block the app
+      handleSuccess();
+    };
+    
+    document.head.appendChild(fallbackLink);
+  };
+  
+  link.onload = handleSuccess;
+  link.onerror = handleError;
+  
   document.head.appendChild(link);
+
+  // Also include CSS inline as fallback
+  const style = document.createElement('style');
+  style.textContent = `
+    .mapillary-js {
+      position: relative;
+      height: 100%;
+      width: 100%;
+    }
+    .mapillary-js .mapillary-bearing-indicator {
+      position: absolute;
+      width: 60px;
+      height: 60px;
+      bottom: 10px;
+      right: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+  `;
+  document.head.appendChild(style);
 };

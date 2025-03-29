@@ -42,6 +42,7 @@ const GameRoom = () => {
   const [showResults, setShowResults] = useState(false);
   const [showFinalResults, setShowFinalResults] = useState(false);
   const [tempGuessLocation, setTempGuessLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [pendingGuessLocation, setPendingGuessLocation] = useState<{lat: number, lng: number} | null>(null);
   
   const currentPlayer = playerId 
     ? gameState.players.find(p => p.id === playerId)
@@ -69,13 +70,14 @@ const GameRoom = () => {
   }, [currentRound?.isComplete, gameState.isActive]);
   
   const handleMapSelection = (lat: number, lng: number) => {
-    setTempGuessLocation({lat, lng});
+    setPendingGuessLocation({lat, lng});
   };
   
   const handleGuessSubmit = () => {
-    if (!playerId || hasGuessed || !tempGuessLocation) return;
+    if (!playerId || hasGuessed || !pendingGuessLocation) return;
     
-    submitGuess(playerId, tempGuessLocation.lat, tempGuessLocation.lng);
+    submitGuess(playerId, pendingGuessLocation.lat, pendingGuessLocation.lng);
+    setTempGuessLocation(pendingGuessLocation);
     setHasGuessed(true);
     
     toast({
@@ -88,6 +90,7 @@ const GameRoom = () => {
     setShowResults(false);
     setHasGuessed(false);
     setTempGuessLocation(null);
+    setPendingGuessLocation(null);
     
     if (gameState.currentRound >= gameState.totalRounds - 1) {
       setShowFinalResults(true);
@@ -117,6 +120,7 @@ const GameRoom = () => {
     setShowFinalResults(false);
     setHasGuessed(false);
     setTempGuessLocation(null);
+    setPendingGuessLocation(null);
     
     toast({
       title: "New Game Started",
@@ -320,8 +324,9 @@ const GameRoom = () => {
               guessLocation={currentPlayer?.guessLocation || (hasGuessed ? tempGuessLocation : undefined)}
               actualLocation={currentRound?.isComplete ? currentRound.location.position : undefined}
               isRevealed={currentRound?.isComplete || false}
-              disabled={hasGuessed || !gameState.isActive}
+              disabled={hasGuessed}
               className="h-full"
+              onSubmitGuess={handleGuessSubmit}
             />
           </div>
           
@@ -332,16 +337,6 @@ const GameRoom = () => {
               className="h-full"
             />
           </div>
-          
-          {!hasGuessed && !currentRound?.isComplete && (
-            <Button 
-              disabled={!tempGuessLocation}
-              className="w-full" 
-              onClick={handleGuessSubmit}
-            >
-              <Send className="mr-2 h-4 w-4" /> Submit Guess
-            </Button>
-          )}
         </div>
       </main>
       

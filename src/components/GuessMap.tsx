@@ -1,6 +1,8 @@
+
 import React, { useEffect, useRef, useState } from "react";
-import { MapPin } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+import { MapPin, Check } from "lucide-react";
+import { Card, CardContent, CardFooter } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
 import L from 'leaflet';
@@ -106,6 +108,11 @@ const GuessMap = ({
   onSubmitGuess,
 }: GuessMapProps) => {
   const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [isSubmitEnabled, setIsSubmitEnabled] = useState(false);
+
+  useEffect(() => {
+    setIsSubmitEnabled(Boolean(selectedLocation || guessLocation));
+  }, [selectedLocation, guessLocation]);
 
   const handleMapClick = (lat: number, lng: number) => {
     if (disabled) return;
@@ -116,6 +123,12 @@ const GuessMap = ({
     // Call onGuess callback if provided, but don't finalize the guess
     if (onGuess) {
       onGuess(lat, lng);
+    }
+  };
+
+  const handleSubmitGuess = () => {
+    if (onSubmitGuess && isSubmitEnabled) {
+      onSubmitGuess();
     }
   };
 
@@ -139,7 +152,7 @@ const GuessMap = ({
 
   return (
     <Card className={cn("overflow-hidden", className)}>
-      <CardContent className="p-0 h-full relative">
+      <CardContent className="p-0 h-[calc(100%-60px)] relative">
         <MapContainer 
           center={[20, 0]} 
           zoom={2} 
@@ -209,6 +222,17 @@ const GuessMap = ({
           </div>
         )}
       </CardContent>
+      <CardFooter className="flex justify-center p-3">
+        {!disabled && !isRevealed && (
+          <Button 
+            onClick={handleSubmitGuess} 
+            disabled={!isSubmitEnabled}
+            className="w-full"
+          >
+            <Check className="mr-2 h-4 w-4" /> Submit Guess
+          </Button>
+        )}
+      </CardFooter>
     </Card>
   );
 };
