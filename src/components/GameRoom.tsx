@@ -304,21 +304,21 @@ const GameRoom = () => {
         </div>
       </header>
       
-      <main className="flex-1 container mx-auto py-4 px-4 lg:px-8 grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 items-start">
-        <div className="md:col-span-2 h-[50vh] md:h-[calc(100vh-8rem)]">
+      <main className="flex-1 container mx-auto py-4 px-4 lg:px-6 grid grid-cols-1 md:grid-cols-5 gap-4 items-start">
+        <div className="md:col-span-3 h-[50vh] md:h-[calc(100vh-8rem)]">
           <StreetView 
             position={currentRound?.location.position}
             panoId={currentRound?.location.panoId}
           />
         </div>
         
-        <div className="space-y-4 md:h-[calc(100vh-8rem)] flex flex-col">
+        <div className="md:col-span-2 space-y-4 md:h-[calc(100vh-8rem)] flex flex-col">
           <Timer 
             seconds={currentRound?.timeRemaining || 0}
             maxTime={currentRound?.timeLimit || 60}
           />
           
-          <div className="flex-1">
+          <div className="flex-1 min-h-[50vh]">
             <GuessMap 
               onGuess={!hasGuessed ? handleMapSelection : undefined}
               guessLocation={currentPlayer?.guessLocation || (hasGuessed ? tempGuessLocation : undefined)}
@@ -330,7 +330,7 @@ const GameRoom = () => {
             />
           </div>
           
-          <div className="h-64">
+          <div className="h-48 md:h-56">
             <PlayerList 
               players={gameState.players}
               currentRound={gameState.currentRound}

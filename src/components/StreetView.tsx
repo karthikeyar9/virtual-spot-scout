@@ -57,9 +57,10 @@ const StreetView = ({
       console.log("Initializing Mapillary viewer...");
       
       // Create a Mapillary viewer with correct ViewerOptions
+      // Using a client access token that should work for basic viewing
       const viewer = new Mapillary.Viewer({
         container: streetViewRef.current,
-        accessToken: 'MLY|4761405525255083|3efb317758c3ebe4ec7edeea41a91d54', // Public demo key
+        accessToken: 'MLY|5962228381253293|12545964c090447ba55e6a909a759d41', // Updated client token
         component: {
           cover: false,
           bearing: true,
@@ -112,7 +113,7 @@ const StreetView = ({
       // Convert position to Mapillary image ID (nearest image)
       console.log(`Requesting image near ${lat},${lng}`);
       const response = await fetch(
-        `https://graph.mapillary.com/images?access_token=MLY|4761405525255083|3efb317758c3ebe4ec7edeea41a91d54&fields=id&limit=1&closeto=${lng},${lat}`
+        `https://graph.mapillary.com/images?access_token=MLY|5962228381253293|12545964c090447ba55e6a909a759d41&fields=id&limit=1&closeto=${lng},${lat}`
       );
       
       const data = await response.json();
@@ -135,10 +136,10 @@ const StreetView = ({
   const loadRandomLocation = async (viewer: Mapillary.Viewer) => {
     // Try some interesting locations when no specific location is provided
     const randomLocations = [
-      { key: "227409887608392", name: "Times Square, NYC" },
-      { key: "523807935785302", name: "Golden Gate Bridge, SF" },
-      { key: "1058421999886976", name: "Eiffel Tower, Paris" },
-      { key: "380837778861888", name: "Colosseum, Rome" },
+      { key: "1090120575825717", name: "Times Square, NYC" },
+      { key: "223149064062795", name: "Golden Gate Bridge, SF" },
+      { key: "419741845315414", name: "Eiffel Tower, Paris" },
+      { key: "168404402108050", name: "Colosseum, Rome" },
     ];
     
     const location = randomLocations[Math.floor(Math.random() * randomLocations.length)];

@@ -19,15 +19,15 @@ const PlayerList = ({ players, currentRound, className }: PlayerListProps) => {
 
   return (
     <Card className={cn("h-full", className)}>
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-2 pt-3">
         <CardTitle className="text-lg flex items-center">
           <Users className="mr-2 h-5 w-5" />
           Players ({players.length})
         </CardTitle>
       </CardHeader>
-      <CardContent className="p-0">
-        <ScrollArea className="h-[calc(100%-60px)] pb-4">
-          <div className="px-4 pb-4 space-y-2">
+      <CardContent className="p-0 pb-3">
+        <ScrollArea className="h-[calc(100%-48px)] pr-3">
+          <div className="px-4 pb-1 space-y-2">
             {sortedPlayers.map((player, index) => (
               <div 
                 key={player.id}
