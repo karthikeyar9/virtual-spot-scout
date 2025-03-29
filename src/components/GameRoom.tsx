@@ -11,6 +11,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Globe, Send, Copy, Share2 } from "lucide-react";
 import { useGameState } from "@/hooks/useGameState";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import StreetView from "./StreetView";
 import GuessMap from "./GuessMap";
 import Timer from "./Timer";
