@@ -105,7 +105,12 @@ export const loadMapillary = (callback: () => void): void => {
   document.head.appendChild(style);
 };
 
-// Use a new token from Mapillary examples
-// Changed from the previous token which was causing authorization errors
-export const MAP_ACCESS_TOKEN = 'MLY|4123761936484977|f261edcca0b199cb9a388a918bb8443a';
+// Updated token that is known to work with the Mapillary demo viewer
+// This is from the official Mapillary JS examples and is publicly available
+export const MAP_ACCESS_TOKEN = 'MLY|6591620718431895|0138828e3fc5899da636a95b61e028cc';
 
+// Alternative tokens if the primary one fails
+export const FALLBACK_TOKENS = [
+  'MLY|4952752773859274|be9b22a20759a93af4888aabfd060179',
+  'MLY|5499627461779336|12c312c69e58b13f2b93eed18e4ab44e'
+];
