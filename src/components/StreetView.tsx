@@ -54,29 +54,26 @@ const StreetView = ({
     if (!streetViewRef.current || viewerRef.current) return;
     
     try {
-      // Create a Mapillary viewer
+      // Create a Mapillary viewer with correct ViewerOptions
       const viewer = new Mapillary.Viewer({
         container: streetViewRef.current,
-        clientId: 'MLY|4761405525255083|3efb317758c3ebe4ec7edeea41a91d54', // Public demo key
+        accessToken: 'MLY|4761405525255083|3efb317758c3ebe4ec7edeea41a91d54', // Public demo key
         component: {
           cover: false,
           bearing: true,
-          zoom: true,
           sequence: false,
         }
       });
       
       viewerRef.current = viewer;
       
-      // Set up event listeners
-      viewer.on(Mapillary.Viewer.Event.NODE_CHANGED, (event) => {
-        console.log("Current image ID:", event.properties.id);
+      // Set up event listeners with correct event types
+      viewer.on(Mapillary.Viewer.nodechanged, (event) => {
+        console.log("Current image ID:", event.image.id);
       });
       
-      viewer.on(Mapillary.Viewer.Event.STATE_CHANGED, (event) => {
-        if (event.state === Mapillary.State.TRAVERSING) {
-          // Still loading/moving
-        } else if (event.state === Mapillary.State.WAITING) {
+      viewer.on(Mapillary.Viewer.navigable, (event) => {
+        if (event.navigable) {
           // Loaded and ready
           setIsLoaded(true);
           if (onLoad) onLoad();
@@ -158,15 +155,13 @@ const StreetView = ({
       }
       
       // Update camera position
-      // Note: Mapillary doesn't directly support setBearing but can control camera
-      const camera = viewerRef.current.getComponent("camera");
-      if (camera) {
-        // Set bearing (heading)
-        viewerRef.current.moveDir(heading);
-        
-        // Zoom level conversion - apply field of view
-        viewerRef.current.setFieldOfView(calculateFov(zoom));
-      }
+      // Mapillary API doesn't have direct camera control methods
+      // so we need to use moveDir for heading/bearing
+      viewerRef.current.moveDir(heading);
+      
+      // Set zoom level by adjusting field of view
+      viewerRef.current.setFieldOfView(calculateFov(zoom));
+      
     } catch (e) {
       console.error("Error updating Mapillary view:", e);
     }
