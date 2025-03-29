@@ -1,8 +1,43 @@
+
 import React, { useEffect, useRef, useState } from "react";
 import { MapPin } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { loadGoogleMapsApi } from "@/utils/googleMapsLoader";
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+
+// Fix Leaflet default icon issue
+import icon from 'leaflet/dist/images/marker-icon.png';
+import iconShadow from 'leaflet/dist/images/marker-shadow.png';
+
+let DefaultIcon = L.icon({
+  iconUrl: icon,
+  shadowUrl: iconShadow,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41]
+});
+
+L.Marker.prototype.options.icon = DefaultIcon;
+
+// Custom marker icons
+const guessIcon = new L.Icon({
+  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.3.4/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41]
+});
+
+const actualIcon = new L.Icon({
+  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.3.4/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41]
+});
 
 interface GuessMapProps {
   onGuess?: (lat: number, lng: number) => void;
@@ -13,11 +48,53 @@ interface GuessMapProps {
   disabled?: boolean;
 }
 
-declare global {
-  interface Window {
-    google: any;
-  }
-}
+// Helper component to handle map click events
+const MapClickHandler = ({ onClick, disabled }: { onClick: (lat: number, lng: number) => void, disabled: boolean }) => {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (disabled) return;
+    
+    const handleClick = (e: L.LeafletMouseEvent) => {
+      onClick(e.latlng.lat, e.latlng.lng);
+    };
+    
+    map.on('click', handleClick);
+    
+    return () => {
+      map.off('click', handleClick);
+    };
+  }, [map, onClick, disabled]);
+  
+  return null;
+};
+
+// Helper component to handle map bounds
+const UpdateMapBounds = ({ 
+  guessLocation, 
+  actualLocation, 
+  isRevealed 
+}: { 
+  guessLocation?: { lat: number; lng: number }; 
+  actualLocation?: { lat: number; lng: number }; 
+  isRevealed: boolean;
+}) => {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (isRevealed && actualLocation && guessLocation) {
+      const bounds = L.latLngBounds(
+        L.latLng(actualLocation.lat, actualLocation.lng),
+        L.latLng(guessLocation.lat, guessLocation.lng)
+      );
+      map.fitBounds(bounds.pad(0.2));
+    } else if (guessLocation) {
+      map.setView([guessLocation.lat, guessLocation.lng], 5);
+    }
+  }, [map, guessLocation, actualLocation, isRevealed]);
+  
+  return null;
+};
 
 const GuessMap = ({
   onGuess,
@@ -27,134 +104,7 @@ const GuessMap = ({
   className,
   disabled = false,
 }: GuessMapProps) => {
-  const mapRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<any>(null);
-  const markerRef = useRef<any>(null);
-  const actualMarkerRef = useRef<any>(null);
-  const lineRef = useRef<any>(null);
   const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
-
-  // Initialize the map
-  useEffect(() => {
-    // Use our shared Google Maps loader
-    loadGoogleMapsApi(() => {
-      if (mapRef.current && !mapInstanceRef.current) {
-        initializeMap();
-      }
-    });
-
-    return () => {
-      // Clean up map instance if needed
-      mapInstanceRef.current = null;
-    };
-  }, []);
-
-  // Update map when props change
-  useEffect(() => {
-    if (mapInstanceRef.current) {
-      updateMapState();
-    }
-  }, [guessLocation, actualLocation, isRevealed, disabled]);
-
-  const initializeMap = () => {
-    if (!mapRef.current || mapInstanceRef.current) return;
-    
-    const map = new window.google.maps.Map(mapRef.current, {
-      center: { lat: 20, lng: 0 },
-      zoom: 2,
-      disableDefaultUI: true,
-      zoomControl: true,
-      streetViewControl: false,
-      fullscreenControl: false,
-      mapTypeControl: false,
-      styles: [
-        {
-          featureType: "poi",
-          elementType: "labels",
-          stylers: [{ visibility: "off" }],
-        },
-      ],
-    });
-    
-    mapInstanceRef.current = map;
-    
-    if (!disabled) {
-      map.addListener("click", (e: any) => {
-        handleMapClick(e.latLng.lat(), e.latLng.lng());
-      });
-    }
-  };
-
-  const updateMapState = () => {
-    if (!mapInstanceRef.current) return;
-    
-    // Handle guess marker
-    if (guessLocation) {
-      if (!markerRef.current) {
-        markerRef.current = new window.google.maps.Marker({
-          position: guessLocation,
-          map: mapInstanceRef.current,
-          icon: {
-            path: window.google.maps.SymbolPath.CIRCLE,
-            scale: 7,
-            fillColor: "#3b82f6",
-            fillOpacity: 1,
-            strokeColor: "#ffffff",
-            strokeWeight: 2,
-          },
-        });
-      } else {
-        markerRef.current.setPosition(guessLocation);
-      }
-      setSelectedLocation(guessLocation);
-    }
-    
-    // Handle actual location marker and line when revealed
-    if (isRevealed && actualLocation) {
-      // Create or update actual location marker
-      if (!actualMarkerRef.current) {
-        actualMarkerRef.current = new window.google.maps.Marker({
-          position: actualLocation,
-          map: mapInstanceRef.current,
-          icon: {
-            path: window.google.maps.SymbolPath.CIRCLE,
-            scale: 7,
-            fillColor: "#10b981",
-            fillOpacity: 1,
-            strokeColor: "#ffffff",
-            strokeWeight: 2,
-          },
-        });
-      } else {
-        actualMarkerRef.current.setPosition(actualLocation);
-      }
-      
-      // Create or update line between guess and actual locations
-      if (guessLocation && !lineRef.current) {
-        lineRef.current = new window.google.maps.Polyline({
-          path: [guessLocation, actualLocation],
-          geodesic: true,
-          strokeColor: "#6366f1",
-          strokeOpacity: 0.8,
-          strokeWeight: 2,
-          map: mapInstanceRef.current,
-        });
-      } else if (guessLocation && lineRef.current) {
-        lineRef.current.setPath([guessLocation, actualLocation]);
-      }
-      
-      // Fit bounds to show both markers
-      if (guessLocation) {
-        const bounds = new window.google.maps.LatLngBounds();
-        bounds.extend(actualLocation);
-        bounds.extend(guessLocation);
-        mapInstanceRef.current.fitBounds(bounds, 50);
-      } else {
-        mapInstanceRef.current.setCenter(actualLocation);
-        mapInstanceRef.current.setZoom(5);
-      }
-    }
-  };
 
   const handleMapClick = (lat: number, lng: number) => {
     if (disabled) return;
@@ -162,57 +112,93 @@ const GuessMap = ({
     const location = { lat, lng };
     setSelectedLocation(location);
     
-    // Update marker
-    if (!markerRef.current) {
-      markerRef.current = new window.google.maps.Marker({
-        position: location,
-        map: mapInstanceRef.current,
-        icon: {
-          path: window.google.maps.SymbolPath.CIRCLE,
-          scale: 7,
-          fillColor: "#3b82f6",
-          fillOpacity: 1,
-          strokeColor: "#ffffff",
-          strokeWeight: 2,
-        },
-      });
-    } else {
-      markerRef.current.setPosition(location);
-    }
-    
     // Call onGuess callback if provided
     if (onGuess) {
       onGuess(lat, lng);
     }
   };
 
-  // Render a placeholder if no API key
-  const renderPlaceholder = () => (
-    <div className="flex flex-col items-center justify-center h-full bg-muted p-6 text-center">
-      <MapPin className="h-16 w-16 mb-4 text-muted-foreground" />
-      <p className="text-lg font-medium mb-2">World Map</p>
-      <p className="text-sm text-muted-foreground mb-4">
-        Please add a valid Google Maps API key to googleMapsLoader.ts
-      </p>
-      <div className="w-full h-44 bg-background/50 rounded flex items-center justify-center">
-        <p className="text-muted-foreground text-sm">Map will appear here</p>
-      </div>
-    </div>
-  );
+  // Calculate the distance between two points (in km)
+  const calculateDistance = () => {
+    if (!actualLocation || !guessLocation) return null;
+    
+    // Haversine formula
+    const R = 6371; // Earth's radius in km
+    const dLat = (actualLocation.lat - guessLocation.lat) * Math.PI / 180;
+    const dLon = (actualLocation.lng - guessLocation.lng) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(guessLocation.lat * Math.PI / 180) * Math.cos(actualLocation.lat * Math.PI / 180) * 
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const distance = R * c;
+    
+    return Math.round(distance);
+  };
 
   return (
     <Card className={cn("overflow-hidden", className)}>
       <CardContent className="p-0 h-full relative">
-        <div ref={mapRef} className="map-container h-full" />
-        {!window.google && renderPlaceholder()}
+        <MapContainer 
+          center={[20, 0]} 
+          zoom={2} 
+          style={{ height: '100%', width: '100%' }}
+          zoomControl={true}
+          attributionControl={true}
+          worldCopyJump={true}
+        >
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          
+          {guessLocation && (
+            <Marker position={[guessLocation.lat, guessLocation.lng]} icon={guessIcon}>
+              <Popup>Your guess</Popup>
+            </Marker>
+          )}
+          
+          {isRevealed && actualLocation && (
+            <Marker position={[actualLocation.lat, actualLocation.lng]} icon={actualIcon}>
+              <Popup>Actual location</Popup>
+            </Marker>
+          )}
+          
+          {isRevealed && guessLocation && actualLocation && (
+            <>
+              <Polyline 
+                positions={[
+                  [guessLocation.lat, guessLocation.lng],
+                  [actualLocation.lat, actualLocation.lng]
+                ]}
+                color="#6366f1"
+                weight={3}
+                opacity={0.7}
+              />
+            </>
+          )}
+          
+          <MapClickHandler onClick={handleMapClick} disabled={disabled} />
+          <UpdateMapBounds 
+            guessLocation={guessLocation} 
+            actualLocation={actualLocation}
+            isRevealed={isRevealed}
+          />
+        </MapContainer>
         
         {!isRevealed && !disabled && (
-          <div className="absolute bottom-4 left-4 right-4 bg-background/80 backdrop-blur-sm p-3 rounded-md text-sm text-center">
+          <div className="absolute bottom-4 left-4 right-4 bg-background/80 backdrop-blur-sm p-3 rounded-md text-sm text-center z-[1000]">
             {selectedLocation ? (
               <p>Click the map to update your guess or submit to confirm</p>
             ) : (
               <p>Click anywhere on the map to make your guess</p>
             )}
+          </div>
+        )}
+        
+        {isRevealed && guessLocation && actualLocation && (
+          <div className="absolute top-4 right-4 bg-background/80 backdrop-blur-sm p-3 rounded-md text-sm font-semibold z-[1000]">
+            Distance: {calculateDistance()} km
           </div>
         )}
       </CardContent>

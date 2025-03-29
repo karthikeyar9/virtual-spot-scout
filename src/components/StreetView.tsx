@@ -1,8 +1,9 @@
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Compass } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { loadGoogleMapsApi } from "@/utils/googleMapsLoader";
+import { loadMapillary } from "@/utils/mapillaryLoader";
+import * as Mapillary from 'mapillary-js';
 
 interface StreetViewProps {
   position?: { lat: number; lng: number };
@@ -11,12 +12,6 @@ interface StreetViewProps {
   pitch?: number;
   zoom?: number;
   onLoad?: () => void;
-}
-
-declare global {
-  interface Window {
-    google: any;
-  }
 }
 
 const StreetView = ({ 
@@ -28,92 +23,143 @@ const StreetView = ({
   onLoad 
 }: StreetViewProps) => {
   const streetViewRef = useRef<HTMLDivElement>(null);
-  const streetViewInstanceRef = useRef<any>(null);
+  const viewerRef = useRef<Mapillary.Viewer | null>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Use our shared Google Maps loader
-    loadGoogleMapsApi(() => {
+    // Use our shared Mapillary loader
+    loadMapillary(() => {
       if (streetViewRef.current) {
-        initializeStreetView();
+        initializeMapillary();
       }
     });
 
     return () => {
-      // Clean up street view instance if needed
-      streetViewInstanceRef.current = null;
+      // Clean up Mapillary viewer instance
+      if (viewerRef.current) {
+        viewerRef.current.remove();
+        viewerRef.current = null;
+      }
     };
   }, []);
 
   useEffect(() => {
-    if (streetViewInstanceRef.current && (position || panoId)) {
-      updateStreetView();
+    if (viewerRef.current && isLoaded && (position || panoId)) {
+      updateMapillaryView();
     }
-  }, [position, panoId, heading, pitch, zoom]);
+  }, [position, panoId, heading, pitch, zoom, isLoaded]);
 
-  const initializeStreetView = () => {
-    if (!streetViewRef.current || streetViewInstanceRef.current) return;
+  const initializeMapillary = async () => {
+    if (!streetViewRef.current || viewerRef.current) return;
     
-    const panorama = new window.google.maps.StreetViewPanorama(
-      streetViewRef.current,
-      {
-        position: position || { lat: 0, lng: 0 },
-        pano: panoId,
-        pov: {
-          heading,
-          pitch,
-        },
-        zoom,
-        addressControl: false,
-        fullscreenControl: false,
-        linksControl: true,
-        panControl: true,
-        enableCloseButton: false,
-        zoomControl: true,
-        showRoadLabels: false,
-      }
-    );
-    
-    streetViewInstanceRef.current = panorama;
-    
-    // Call onLoad callback when Street View is initialized
-    if (onLoad) {
-      window.google.maps.event.addListenerOnce(
-        panorama,
-        "status_changed",
-        () => {
-          if (panorama.getStatus() === "OK") {
-            onLoad();
-          }
+    try {
+      // Create a Mapillary viewer
+      const viewer = new Mapillary.Viewer({
+        container: streetViewRef.current,
+        clientId: 'MLY|4761405525255083|3efb317758c3ebe4ec7edeea41a91d54', // Public demo key
+        component: {
+          cover: false,
+          bearing: { size: "small" },
+          zoom: true,
+          sequence: { visible: false },
         }
-      );
+      });
+      
+      viewerRef.current = viewer;
+      
+      // Set up event listeners
+      viewer.on(Mapillary.Viewer.nodechanged, (event) => {
+        console.log("Current image ID:", event.image.id);
+      });
+      
+      viewer.on(Mapillary.Viewer.loadingchanged, (event) => {
+        if (!event.loading) {
+          setIsLoaded(true);
+          if (onLoad) onLoad();
+        }
+      });
+      
+      // If we have a specific panoId or position, use it
+      if (panoId) {
+        viewer.moveTo(panoId).catch(e => {
+          console.error("Error moving to specific image:", e);
+          // Try random location if specific ID fails
+          loadRandomLocation(viewer);
+        });
+      } else if (position) {
+        viewer.moveCloseTo(position.lat, position.lng).catch(e => {
+          console.error("Error moving to position:", e);
+          // Try random location if specific position fails
+          loadRandomLocation(viewer);
+        });
+      } else {
+        // Load a random street view if no specific location is provided
+        loadRandomLocation(viewer);
+      }
+    } catch (e) {
+      console.error("Error initializing Mapillary:", e);
+      setError("Failed to initialize street view. Please try again later.");
     }
   };
 
-  const updateStreetView = () => {
-    if (!streetViewInstanceRef.current) return;
+  const loadRandomLocation = async (viewer: Mapillary.Viewer) => {
+    // Try some interesting locations when no specific location is provided
+    const randomLocations = [
+      { key: "227409887608392", name: "Times Square, NYC" },
+      { key: "523807935785302", name: "Golden Gate Bridge, SF" },
+      { key: "1058421999886976", name: "Eiffel Tower, Paris" },
+      { key: "380837778861888", name: "Colosseum, Rome" },
+    ];
     
-    if (panoId) {
-      streetViewInstanceRef.current.setPano(panoId);
-    } else if (position) {
-      streetViewInstanceRef.current.setPosition(position);
+    const location = randomLocations[Math.floor(Math.random() * randomLocations.length)];
+    
+    try {
+      await viewer.moveTo(location.key);
+      console.log(`Loaded random location: ${location.name}`);
+    } catch (e) {
+      console.error("Error loading random location:", e);
+      setError("Could not load street view. Please try again.");
     }
-    
-    streetViewInstanceRef.current.setPov({
-      heading,
-      pitch,
-    });
-    
-    streetViewInstanceRef.current.setZoom(zoom);
   };
 
-  // Render a placeholder if no API key
+  const updateMapillaryView = async () => {
+    if (!viewerRef.current) return;
+    
+    try {
+      if (panoId) {
+        await viewerRef.current.moveTo(panoId);
+      } else if (position) {
+        await viewerRef.current.moveCloseTo(position.lat, position.lng);
+      }
+      
+      // Update camera position
+      viewerRef.current.setBearing(heading);
+      viewerRef.current.setFieldOfView(calculateFov(zoom));
+    } catch (e) {
+      console.error("Error updating Mapillary view:", e);
+    }
+  };
+
+  // Helper function to convert zoom to FOV
+  const calculateFov = (zoom: number): number => {
+    // Mapillary uses FOV in degrees (lower value = more zoom)
+    // Convert our zoom scale (1-4) to FOV (90-30 degrees)
+    return 90 - ((zoom - 1) * 20);
+  };
+
+  // Render a placeholder if error or no location
   const renderPlaceholder = () => (
     <div className="flex flex-col items-center justify-center h-full bg-muted p-6 text-center">
       <Compass className="h-16 w-16 mb-4 text-muted-foreground" />
       <p className="text-lg font-medium mb-2">Street View</p>
-      <p className="text-sm text-muted-foreground mb-4">
-        Please add a valid Google Maps API key to googleMapsLoader.ts
-      </p>
+      {error ? (
+        <p className="text-sm text-red-500 mb-4">{error}</p>
+      ) : (
+        <p className="text-sm text-muted-foreground mb-4">
+          Select a location to view street imagery
+        </p>
+      )}
       <div className="w-full h-44 bg-background/50 rounded flex items-center justify-center">
         <p className="text-muted-foreground text-sm">Street view will appear here</p>
       </div>
@@ -123,11 +169,8 @@ const StreetView = ({
   return (
     <Card className="overflow-hidden h-full">
       <CardContent className="p-0 h-full">
-        {position || panoId ? (
-          <div ref={streetViewRef} className="street-view-container h-full" />
-        ) : (
-          renderPlaceholder()
-        )}
+        <div ref={streetViewRef} className="street-view-container h-full" />
+        {(!isLoaded && !viewerRef.current) && renderPlaceholder()}
       </CardContent>
     </Card>
   );
