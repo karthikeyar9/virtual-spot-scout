@@ -5,7 +5,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter 
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription 
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Globe, Send, Copy, Share2 } from "lucide-react";
@@ -41,6 +41,7 @@ const GameRoom = () => {
   const [hasGuessed, setHasGuessed] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [showFinalResults, setShowFinalResults] = useState(false);
+  const [tempGuessLocation, setTempGuessLocation] = useState<{lat: number, lng: number} | null>(null);
   
   const currentPlayer = playerId 
     ? gameState.players.find(p => p.id === playerId)
@@ -67,9 +68,14 @@ const GameRoom = () => {
     }
   }, [currentRound?.isComplete, gameState.isActive]);
   
-  const handleGuess = (lat: number, lng: number) => {
-    if (!playerId || hasGuessed) return;
-    submitGuess(playerId, lat, lng);
+  const handleMapSelection = (lat: number, lng: number) => {
+    setTempGuessLocation({lat, lng});
+  };
+  
+  const handleGuessSubmit = () => {
+    if (!playerId || hasGuessed || !tempGuessLocation) return;
+    
+    submitGuess(playerId, tempGuessLocation.lat, tempGuessLocation.lng);
     setHasGuessed(true);
     
     toast({
@@ -81,6 +87,7 @@ const GameRoom = () => {
   const handleNextRound = () => {
     setShowResults(false);
     setHasGuessed(false);
+    setTempGuessLocation(null);
     
     if (gameState.currentRound >= gameState.totalRounds - 1) {
       setShowFinalResults(true);
@@ -109,6 +116,7 @@ const GameRoom = () => {
     resetGame();
     setShowFinalResults(false);
     setHasGuessed(false);
+    setTempGuessLocation(null);
     
     toast({
       title: "New Game Started",
@@ -308,8 +316,8 @@ const GameRoom = () => {
           
           <div className="flex-1">
             <GuessMap 
-              onGuess={!hasGuessed ? handleGuess : undefined}
-              guessLocation={currentPlayer?.guessLocation}
+              onGuess={!hasGuessed ? handleMapSelection : undefined}
+              guessLocation={currentPlayer?.guessLocation || (hasGuessed ? tempGuessLocation : undefined)}
               actualLocation={currentRound?.isComplete ? currentRound.location.position : undefined}
               isRevealed={currentRound?.isComplete || false}
               disabled={hasGuessed || !gameState.isActive}
@@ -327,15 +335,9 @@ const GameRoom = () => {
           
           {!hasGuessed && !currentRound?.isComplete && (
             <Button 
-              disabled={!currentPlayer?.guessLocation}
-              className="w-full"
-              onClick={() => {
-                setHasGuessed(true);
-                toast({
-                  title: "Guess Submitted",
-                  description: "Waiting for other players to finish",
-                });
-              }}
+              disabled={!tempGuessLocation}
+              className="w-full" 
+              onClick={handleGuessSubmit}
             >
               <Send className="mr-2 h-4 w-4" /> Submit Guess
             </Button>
@@ -345,6 +347,8 @@ const GameRoom = () => {
       
       <Dialog open={showResults} onOpenChange={setShowResults}>
         <DialogContent>
+          <DialogTitle>Round Results</DialogTitle>
+          <DialogDescription>See how close your guess was!</DialogDescription>
           <ResultsDisplay 
             players={gameState.players}
             location={currentRound?.location}

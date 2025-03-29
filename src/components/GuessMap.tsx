@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState } from "react";
 import { MapPin } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -46,6 +45,7 @@ interface GuessMapProps {
   isRevealed?: boolean;
   className?: string;
   disabled?: boolean;
+  onSubmitGuess?: () => void;
 }
 
 // Helper component to handle map click events
@@ -103,6 +103,7 @@ const GuessMap = ({
   isRevealed = false,
   className,
   disabled = false,
+  onSubmitGuess,
 }: GuessMapProps) => {
   const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
 
@@ -112,7 +113,7 @@ const GuessMap = ({
     const location = { lat, lng };
     setSelectedLocation(location);
     
-    // Call onGuess callback if provided
+    // Call onGuess callback if provided, but don't finalize the guess
     if (onGuess) {
       onGuess(lat, lng);
     }
@@ -152,8 +153,14 @@ const GuessMap = ({
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           
-          {guessLocation && (
-            <Marker position={[guessLocation.lat, guessLocation.lng]} icon={guessIcon}>
+          {(guessLocation || selectedLocation) && (
+            <Marker 
+              position={[
+                guessLocation?.lat || selectedLocation?.lat || 0, 
+                guessLocation?.lng || selectedLocation?.lng || 0
+              ]} 
+              icon={guessIcon}
+            >
               <Popup>Your guess</Popup>
             </Marker>
           )}
@@ -180,7 +187,7 @@ const GuessMap = ({
           
           <MapClickHandler onClick={handleMapClick} disabled={disabled} />
           <UpdateMapBounds 
-            guessLocation={guessLocation} 
+            guessLocation={guessLocation || selectedLocation || undefined} 
             actualLocation={actualLocation}
             isRevealed={isRevealed}
           />
@@ -188,8 +195,8 @@ const GuessMap = ({
         
         {!isRevealed && !disabled && (
           <div className="absolute bottom-4 left-4 right-4 bg-background/80 backdrop-blur-sm p-3 rounded-md text-sm text-center z-[1000]">
-            {selectedLocation ? (
-              <p>Click the map to update your guess or submit to confirm</p>
+            {selectedLocation || guessLocation ? (
+              <p>Click the map to update your guess or use the Submit button to confirm</p>
             ) : (
               <p>Click anywhere on the map to make your guess</p>
             )}

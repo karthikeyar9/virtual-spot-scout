@@ -61,21 +61,19 @@ const StreetView = ({
         component: {
           cover: false,
           bearing: true,
-          sequence: false,
+          sequence: true,
+          direction: true,
+          spatial: true,
+          zoom: true,
+          keyboard: true,
         }
       });
       
       viewerRef.current = viewer;
       
       // Use the correct event names from Mapillary API
-      // Based on the error, we need to use 'spatialedges' or other valid event types
       viewer.on('image', (event) => {
         console.log("Current image ID:", event.image.id);
-      });
-      
-      // Use available event type for detecting when data is loaded
-      viewer.on('position', () => {
-        // Loaded and ready
         setIsLoaded(true);
         if (onLoad) onLoad();
       });
