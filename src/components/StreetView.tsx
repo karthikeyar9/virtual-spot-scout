@@ -67,12 +67,13 @@ const StreetView = ({
       
       viewerRef.current = viewer;
       
-      // Set up event listeners with correct event types
-      viewer.on('nodechanged', (event) => {
+      // Set up event listeners with the correct enum values from Mapillary API
+      viewer.on(Mapillary.ViewerEventType.NodeChanged, (event) => {
         console.log("Current image ID:", event.node.id);
       });
       
-      viewer.on('dataloaded', () => {
+      // Using the correct event type for detecting when data is loaded
+      viewer.on(Mapillary.ViewerEventType.DataLoaded, () => {
         // Loaded and ready
         setIsLoaded(true);
         if (onLoad) onLoad();
