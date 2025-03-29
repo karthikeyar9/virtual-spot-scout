@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { 
@@ -12,7 +11,6 @@ import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Globe, Send, Copy, Share2 } from "lucide-react";
 import { useGameState } from "@/hooks/useGameState";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import StreetView from "./StreetView";
 import GuessMap from "./GuessMap";
 import Timer from "./Timer";
@@ -25,13 +23,11 @@ const GameRoom = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   
-  // Get params from URL
   const playerName = searchParams.get("name") || "Player";
   const isHost = searchParams.get("host") === "true";
   const rounds = parseInt(searchParams.get("rounds") || "5");
   const timeLimit = parseInt(searchParams.get("time") || "60");
   
-  // Game state
   const {
     gameState,
     addPlayer,
@@ -41,27 +37,22 @@ const GameRoom = () => {
     resetGame,
   } = useGameState(roomId, rounds, timeLimit);
   
-  // Local state
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [hasGuessed, setHasGuessed] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [showFinalResults, setShowFinalResults] = useState(false);
   
-  // Get current player
   const currentPlayer = playerId 
     ? gameState.players.find(p => p.id === playerId)
     : null;
   
-  // Get current round
   const currentRound = gameState.rounds[gameState.currentRound];
   
-  // Add player on mount
   useEffect(() => {
     if (!playerId && playerName) {
       const id = addPlayer(playerName);
       setPlayerId(id);
       
-      // If host, start the game
       if (isHost && gameState.players.length === 0) {
         setTimeout(() => {
           startGame();
@@ -70,14 +61,12 @@ const GameRoom = () => {
     }
   }, [playerName, isHost, gameState.players.length]);
   
-  // Watch for round completion
   useEffect(() => {
     if (currentRound?.isComplete && !showResults && gameState.isActive) {
       setShowResults(true);
     }
   }, [currentRound?.isComplete, gameState.isActive]);
   
-  // Handle guess submission
   const handleGuess = (lat: number, lng: number) => {
     if (!playerId || hasGuessed) return;
     submitGuess(playerId, lat, lng);
@@ -89,7 +78,6 @@ const GameRoom = () => {
     });
   };
   
-  // Handle moving to next round
   const handleNextRound = () => {
     setShowResults(false);
     setHasGuessed(false);
@@ -101,7 +89,6 @@ const GameRoom = () => {
     }
   };
   
-  // Handle copying room link
   const copyRoomLink = () => {
     const baseUrl = window.location.origin;
     const link = `${baseUrl}/game/${roomId}?name=`;
@@ -114,12 +101,10 @@ const GameRoom = () => {
     });
   };
   
-  // Handle leaving the game
   const handleLeaveGame = () => {
     navigate("/");
   };
   
-  // Handle starting a new game
   const handleNewGame = () => {
     resetGame();
     setShowFinalResults(false);
@@ -151,7 +136,6 @@ const GameRoom = () => {
     );
   }
   
-  // Render waiting screen if game not active
   if (!gameState.isActive) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-b from-accent to-background">
@@ -220,7 +204,6 @@ const GameRoom = () => {
     );
   }
   
-  // Render final results
   if (showFinalResults) {
     const sortedPlayers = [...gameState.players].sort((a, b) => b.score - a.score);
     const winner = sortedPlayers[0];
@@ -288,7 +271,6 @@ const GameRoom = () => {
   
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-blue-50 to-cyan-50 map-pattern">
-      {/* Header */}
       <header className="bg-background border-b p-3 shadow-sm">
         <div className="container mx-auto flex items-center justify-between">
           <div className="flex items-center">
@@ -310,9 +292,7 @@ const GameRoom = () => {
         </div>
       </header>
       
-      {/* Main content */}
       <main className="flex-1 container mx-auto py-4 px-4 lg:px-8 grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 items-start">
-        {/* Left column - Street View */}
         <div className="md:col-span-2 h-[50vh] md:h-[calc(100vh-8rem)]">
           <StreetView 
             position={currentRound?.location.position}
@@ -320,15 +300,12 @@ const GameRoom = () => {
           />
         </div>
         
-        {/* Right column - Map and Players */}
         <div className="space-y-4 md:h-[calc(100vh-8rem)] flex flex-col">
-          {/* Timer */}
           <Timer 
             seconds={currentRound?.timeRemaining || 0}
             maxTime={currentRound?.timeLimit || 60}
           />
           
-          {/* Map */}
           <div className="flex-1">
             <GuessMap 
               onGuess={!hasGuessed ? handleGuess : undefined}
@@ -340,7 +317,6 @@ const GameRoom = () => {
             />
           </div>
           
-          {/* Players */}
           <div className="h-64">
             <PlayerList 
               players={gameState.players}
@@ -349,7 +325,6 @@ const GameRoom = () => {
             />
           </div>
           
-          {/* Guess button */}
           {!hasGuessed && !currentRound?.isComplete && (
             <Button 
               disabled={!currentPlayer?.guessLocation}
@@ -368,7 +343,6 @@ const GameRoom = () => {
         </div>
       </main>
       
-      {/* Results dialog */}
       <Dialog open={showResults} onOpenChange={setShowResults}>
         <DialogContent>
           <ResultsDisplay 
@@ -383,7 +357,6 @@ const GameRoom = () => {
   );
 };
 
-// Adding Badge component inline since we're using it in this file
 const Badge = ({ children, className, variant }: { children: React.ReactNode; className?: string; variant?: "default" | "outline" }) => {
   return (
     <span className={cn(
