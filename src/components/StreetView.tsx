@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState } from "react";
 import { Compass, Map } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -91,7 +90,9 @@ const StreetView = ({
         if (onLoad) onLoad();
       });
       
-      viewer.on('error', (error) => {
+      // Fix: Use a generic event registration since 'error' isn't in the TypeScript definitions
+      // but it does exist in the underlying JavaScript API
+      (viewer as any).on('error', (error: any) => {
         console.error("Mapillary viewer error:", error);
         setError("Error loading street view");
       });
