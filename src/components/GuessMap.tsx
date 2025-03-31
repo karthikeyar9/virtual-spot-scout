@@ -1,237 +1,208 @@
-
 import React, { useEffect, useRef, useState } from "react";
-import { MapPin, Check } from "lucide-react";
+import { MapPin, Send } from "lucide-react";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-
-// Fix Leaflet default icon issue
-import icon from 'leaflet/dist/images/marker-icon.png';
-import iconShadow from 'leaflet/dist/images/marker-shadow.png';
-
-let DefaultIcon = L.icon({
-  iconUrl: icon,
-  shadowUrl: iconShadow,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41]
-});
-
-L.Marker.prototype.options.icon = DefaultIcon;
-
-// Custom marker icons
-const guessIcon = new L.Icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.3.4/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41]
-});
-
-const actualIcon = new L.Icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.3.4/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41]
-});
+import { GoogleMap } from '@react-google-maps/api';
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { AlertCircle } from "lucide-react";
 
 interface GuessMapProps {
-  onGuess?: (lat: number, lng: number) => void;
   actualLocation?: { lat: number; lng: number };
-  guessLocation?: { lat: number; lng: number };
   isRevealed?: boolean;
   className?: string;
   disabled?: boolean;
-  onSubmitGuess?: () => void;
+  onLocationSelect?: (location: { lat: number; lng: number } | null) => void;
+  selectedLocation?: { lat: number; lng: number } | null;
+  onSubmitGuess: () => void;
+  isLoaded: boolean;
+  loadError?: Error | null;
 }
 
-// Helper component to handle map click events
-const MapClickHandler = ({ onClick, disabled }: { onClick: (lat: number, lng: number) => void, disabled: boolean }) => {
-  const map = useMap();
-  
-  useEffect(() => {
-    if (disabled) return;
-    
-    const handleClick = (e: L.LeafletMouseEvent) => {
-      onClick(e.latlng.lat, e.latlng.lng);
-    };
-    
-    map.on('click', handleClick);
-    
-    return () => {
-      map.off('click', handleClick);
-    };
-  }, [map, onClick, disabled]);
-  
-  return null;
+const mapContainerStyle = {
+  width: '100%',
+  height: '100%'
 };
 
-// Helper component to handle map bounds
-const UpdateMapBounds = ({ 
-  guessLocation, 
-  actualLocation, 
-  isRevealed 
-}: { 
-  guessLocation?: { lat: number; lng: number }; 
-  actualLocation?: { lat: number; lng: number }; 
-  isRevealed: boolean;
-}) => {
-  const map = useMap();
-  
-  useEffect(() => {
-    if (isRevealed && actualLocation && guessLocation) {
-      const bounds = L.latLngBounds(
-        L.latLng(actualLocation.lat, actualLocation.lng),
-        L.latLng(guessLocation.lat, guessLocation.lng)
-      );
-      map.fitBounds(bounds.pad(0.2));
-    } else if (guessLocation) {
-      map.setView([guessLocation.lat, guessLocation.lng], 5);
-    }
-  }, [map, guessLocation, actualLocation, isRevealed]);
-  
-  return null;
+const initialCenter = {
+  lat: 0,
+  lng: 0
 };
 
-const GuessMap = ({
-  onGuess,
+const GuessMap: React.FC<GuessMapProps> = ({
   actualLocation,
-  guessLocation,
   isRevealed = false,
   className,
   disabled = false,
+  onLocationSelect,
+  selectedLocation,
   onSubmitGuess,
-}: GuessMapProps) => {
-  const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [isSubmitEnabled, setIsSubmitEnabled] = useState(false);
+  isLoaded,
+  loadError
+}) => {
+  const mapRef = useRef<google.maps.Map | null>(null);
+  const markerRef = useRef<google.maps.Marker | null>(null);
+  const actualMarkerRef = useRef<google.maps.Marker | null>(null);
+  const polylineRef = useRef<google.maps.Polyline | null>(null);
+
+  const onLoad = React.useCallback((map: google.maps.Map) => {
+    mapRef.current = map;
+  }, []);
+
+  const onUnmount = React.useCallback(() => {
+    mapRef.current = null;
+    markerRef.current?.setMap(null);
+    actualMarkerRef.current?.setMap(null);
+    polylineRef.current?.setMap(null);
+    markerRef.current = null;
+    actualMarkerRef.current = null;
+    polylineRef.current = null;
+  }, []);
+
+  const handleMapClick = (e: google.maps.MapMouseEvent) => {
+    if (!disabled && onLocationSelect && e.latLng) {
+      onLocationSelect({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+    }
+  };
 
   useEffect(() => {
-    setIsSubmitEnabled(Boolean(selectedLocation || guessLocation));
-  }, [selectedLocation, guessLocation]);
-
-  const handleMapClick = (lat: number, lng: number) => {
-    if (disabled) return;
-    
-    const location = { lat, lng };
-    setSelectedLocation(location);
-    
-    // Call onGuess callback if provided, but don't finalize the guess
-    if (onGuess) {
-      onGuess(lat, lng);
+    if (!mapRef.current || !isLoaded) return;
+    if (selectedLocation) {
+      if (!markerRef.current) {
+        markerRef.current = new google.maps.Marker({ position: selectedLocation });
+      } else {
+        markerRef.current.setPosition(selectedLocation);
+      }
+      markerRef.current.setMap(mapRef.current);
+    } else if (markerRef.current) {
+      markerRef.current.setMap(null);
     }
-  };
+  }, [isLoaded, selectedLocation]);
 
-  const handleSubmitGuess = () => {
-    if (onSubmitGuess && isSubmitEnabled) {
-      onSubmitGuess();
+  useEffect(() => {
+    if (!mapRef.current || !isLoaded) return;
+    if (isRevealed && actualLocation && selectedLocation) {
+      if (!actualMarkerRef.current) {
+        actualMarkerRef.current = new google.maps.Marker({
+          position: actualLocation,
+          icon: { url: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png' }
+        });
+      } else {
+        actualMarkerRef.current.setPosition(actualLocation);
+      }
+      actualMarkerRef.current.setMap(mapRef.current);
+
+      const lineCoordinates = [selectedLocation, actualLocation];
+      if (!polylineRef.current) {
+        polylineRef.current = new google.maps.Polyline({
+          path: lineCoordinates,
+          geodesic: true,
+          strokeColor: '#FF0000',
+          strokeOpacity: 0.8,
+          strokeWeight: 2
+        });
+      } else {
+        polylineRef.current.setPath(lineCoordinates);
+      }
+      polylineRef.current.setMap(mapRef.current);
+
+      const bounds = new google.maps.LatLngBounds();
+      bounds.extend(selectedLocation);
+      bounds.extend(actualLocation);
+      mapRef.current.fitBounds(bounds);
+      google.maps.event.addListenerOnce(mapRef.current, 'bounds_changed', () => {
+        if (mapRef.current) {
+          let currentZoom = mapRef.current.getZoom();
+          if (typeof currentZoom === 'number' && currentZoom > 2) {
+            mapRef.current.setZoom(currentZoom - 1);
+          }
+        }
+      });
+
+    } else {
+      actualMarkerRef.current?.setMap(null);
+      polylineRef.current?.setMap(null);
     }
-  };
+  }, [isLoaded, isRevealed, actualLocation, selectedLocation]);
 
-  // Calculate the distance between two points (in km)
   const calculateDistance = () => {
-    if (!actualLocation || !guessLocation) return null;
-    
-    // Haversine formula
-    const R = 6371; // Earth's radius in km
-    const dLat = (actualLocation.lat - guessLocation.lat) * Math.PI / 180;
-    const dLon = (actualLocation.lng - guessLocation.lng) * Math.PI / 180;
-    const a = 
-      Math.sin(dLat/2) * Math.sin(dLat/2) +
-      Math.cos(guessLocation.lat * Math.PI / 180) * Math.cos(actualLocation.lat * Math.PI / 180) * 
-      Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    const distance = R * c;
-    
-    return Math.round(distance);
+    if (isLoaded && google.maps.geometry && actualLocation && selectedLocation) {
+      const from = new google.maps.LatLng(selectedLocation.lat, selectedLocation.lng);
+      const to = new google.maps.LatLng(actualLocation.lat, actualLocation.lng);
+      const distanceInMeters = google.maps.geometry.spherical.computeDistanceBetween(from, to);
+      return Math.round(distanceInMeters / 1000);
+    }
+    return null;
   };
+
+  if (!isLoaded) {
+    return (
+      <Card className="flex items-center justify-center h-full">
+        <CardContent className="p-4">
+          Loading Map...
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const distance = isRevealed ? calculateDistance() : null;
 
   return (
-    <Card className={cn("overflow-hidden", className)}>
-      <CardContent className="p-0 h-[calc(100%-60px)] relative">
-        <MapContainer 
-          center={[20, 0]} 
-          zoom={2} 
-          style={{ height: '100%', width: '100%' }}
-          zoomControl={true}
-          attributionControl={true}
-          worldCopyJump={true}
-        >
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          
-          {(guessLocation || selectedLocation) && (
-            <Marker 
-              position={[
-                guessLocation?.lat || selectedLocation?.lat || 0, 
-                guessLocation?.lng || selectedLocation?.lng || 0
-              ]} 
-              icon={guessIcon}
-            >
-              <Popup>Your guess</Popup>
-            </Marker>
-          )}
-          
-          {isRevealed && actualLocation && (
-            <Marker position={[actualLocation.lat, actualLocation.lng]} icon={actualIcon}>
-              <Popup>Actual location</Popup>
-            </Marker>
-          )}
-          
-          {isRevealed && guessLocation && actualLocation && (
-            <>
-              <Polyline 
-                positions={[
-                  [guessLocation.lat, guessLocation.lng],
-                  [actualLocation.lat, actualLocation.lng]
-                ]}
-                color="#6366f1"
-                weight={3}
-                opacity={0.7}
-              />
-            </>
-          )}
-          
-          <MapClickHandler onClick={handleMapClick} disabled={disabled} />
-          <UpdateMapBounds 
-            guessLocation={guessLocation || selectedLocation || undefined} 
-            actualLocation={actualLocation}
-            isRevealed={isRevealed}
-          />
-        </MapContainer>
+    <Card className={cn("h-full flex flex-col", className)}>
+      <CardContent className="p-0 flex-grow relative">
+        {isLoaded && (
+          <GoogleMap
+            mapContainerStyle={mapContainerStyle}
+            center={initialCenter}
+            zoom={2}
+            onLoad={onLoad}
+            onUnmount={onUnmount}
+            onClick={handleMapClick}
+            options={{
+              streetViewControl: false,
+              mapTypeControl: false,
+              fullscreenControl: false,
+              clickableIcons: !disabled,
+              gestureHandling: disabled ? 'none' : 'auto',
+              zoomControl: !disabled
+            }}
+          >
+          </GoogleMap>
+        )}
         
         {!isRevealed && !disabled && (
-          <div className="absolute bottom-4 left-4 right-4 bg-background/80 backdrop-blur-sm p-3 rounded-md text-sm text-center z-[1000]">
-            {selectedLocation || guessLocation ? (
-              <p>Click the map to update your guess or use the Submit button to confirm</p>
+          <div className="absolute bottom-4 left-4 right-4 bg-background/80 backdrop-blur-sm p-3 rounded-md text-sm text-center z-10 pointer-events-none">
+            {selectedLocation ? (
+              <p>Click map to change guess, or Submit below</p>
             ) : (
               <p>Click anywhere on the map to make your guess</p>
             )}
           </div>
         )}
         
-        {isRevealed && guessLocation && actualLocation && (
-          <div className="absolute top-4 right-4 bg-background/80 backdrop-blur-sm p-3 rounded-md text-sm font-semibold z-[1000]">
-            Distance: {calculateDistance()} km
+        {isRevealed && distance !== null && (
+          <div className="absolute top-4 right-4 bg-background/80 backdrop-blur-sm p-2 rounded-md text-sm font-semibold z-10">
+            Distance: {distance} km
           </div>
         )}
       </CardContent>
-      <CardFooter className="flex justify-center p-3">
-        {!disabled && !isRevealed && (
-          <Button 
-            onClick={handleSubmitGuess} 
-            disabled={!isSubmitEnabled}
-            className="w-full"
-          >
-            <Check className="mr-2 h-4 w-4" /> Submit Guess
-          </Button>
-        )}
+      <CardFooter className="p-3 flex justify-between items-center border-t bg-muted/40">
+        <div className="flex items-center gap-2 text-sm min-w-0">
+          <MapPin className="h-4 w-4 flex-shrink-0" />
+          <span className="truncate">
+            {selectedLocation
+              ? `Selected: ${selectedLocation.lat.toFixed(4)}, ${selectedLocation.lng.toFixed(4)}`
+              : isRevealed ? "Round Complete" : "Select a location"}
+          </span>
+        </div>
+        <Button
+          onClick={onSubmitGuess} 
+          disabled={!selectedLocation || disabled || isRevealed}
+          size="sm"
+        >
+          <Send className="h-4 w-4 mr-2" />
+          {isRevealed ? "Submitted" : "Submit Guess"}
+        </Button>
       </CardFooter>
     </Card>
   );

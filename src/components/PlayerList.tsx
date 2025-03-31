@@ -1,11 +1,20 @@
-
 import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Trophy, MapPin, Users } from "lucide-react";
-import { Player } from "@/hooks/useGameState";
+import { Trophy, MapPin, Users, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+interface Player {
+  id: string;
+  name: string;
+  score: number;
+  isHost: boolean;
+  isReady: boolean;
+  guessLocation?: { lat: number; lng: number };
+  roundScore?: number;
+  distanceToTarget?: number;
+}
 
 interface PlayerListProps {
   players: Player[];
@@ -41,10 +50,16 @@ const PlayerList = ({ players, currentRound, className }: PlayerListProps) => {
                     <Trophy className="h-4 w-4 text-yellow-500" />
                   )}
                   <div>
-                    <div className="font-medium flex items-center">
+                    <div className="font-medium flex items-center gap-2">
                       {player.name}
+                      {player.isHost && (
+                        <Badge variant="outline" className="text-xs">Host</Badge>
+                      )}
+                      {player.isReady && (
+                        <Check className="h-4 w-4 text-green-500" />
+                      )}
                       {player.guessLocation && (
-                        <MapPin className="ml-2 h-3 w-3 text-green-500" />
+                        <MapPin className="h-3 w-3 text-green-500" />
                       )}
                     </div>
                     {player.roundScore !== undefined && (

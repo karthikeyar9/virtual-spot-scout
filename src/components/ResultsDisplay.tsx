@@ -1,23 +1,32 @@
-
 import React from "react";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Player, GameLocation, calculateDistance } from "@/hooks/useGameState";
+import { Player } from "@/hooks/useGameState";
 import { Trophy, MapPin, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// Define structure for a single guess within the round
+interface RoundGuess {
+  playerId: string;
+  location: { lat: number; lng: number };
+  score: number;
+  distance: number;
+}
+
 interface ResultsDisplayProps {
   players: Player[];
-  location: GameLocation;
+  guesses: RoundGuess[]; // Expect the array of guesses for this round
+  location: { lat: number; lng: number }; // Expecting target location coordinates
   onNextRound: () => void;
   isLastRound: boolean;
 }
 
-const ResultsDisplay = ({ players, location, onNextRound, isLastRound }: ResultsDisplayProps) => {
-  // Sort players by round score
-  const sortedPlayers = [...players]
-    .filter(player => player.roundScore !== undefined)
-    .sort((a, b) => (b.roundScore || 0) - (a.roundScore || 0));
+const ResultsDisplay = ({ players, guesses, location, onNextRound, isLastRound }: ResultsDisplayProps) => {
+  // Create a map of player ID to player name for easy lookup
+  const playerMap = new Map(players.map(p => [p.id, p.name]));
+
+  // Sort guesses by score (descending)
+  const sortedGuesses = [...guesses].sort((a, b) => b.score - a.score);
 
   return (
     <Card className="w-full max-w-md animate-appear">
@@ -26,43 +35,46 @@ const ResultsDisplay = ({ players, location, onNextRound, isLastRound }: Results
           Round Results
         </CardTitle>
         <div className="text-center text-sm text-muted-foreground">
-          Location: {location.city}, {location.country}
+          Target Location: {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {sortedPlayers.length > 0 ? (
+      <CardContent className="space-y-4 max-h-[60vh] overflow-y-auto">
+        {sortedGuesses.length > 0 ? (
           <div className="space-y-3">
-            {sortedPlayers.map((player, index) => (
-              <div 
-                key={player.id}
-                className={cn(
-                  "flex items-center justify-between p-3 rounded-md",
-                  index === 0 ? "bg-yellow-50 border border-yellow-200" : "bg-background border border-border"
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  {index === 0 && (
-                    <Trophy className="h-5 w-5 text-yellow-500" />
+            {sortedGuesses.map((guess, index) => {
+              const playerName = playerMap.get(guess.playerId) || 'Unknown Player';
+              return (
+                <div 
+                  key={guess.playerId}
+                  className={cn(
+                    "flex items-center justify-between p-3 rounded-md",
+                    index === 0 ? "bg-yellow-50 border border-yellow-200" : "bg-background border border-border"
                   )}
-                  <div>
-                    <div className="font-medium">{player.name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {player.distanceToTarget?.toFixed(0)} km away
+                >
+                  <div className="flex items-center gap-3">
+                    {index === 0 && (
+                      <Trophy className="h-5 w-5 text-yellow-500" />
+                    )}
+                    <div>
+                      <div className="font-medium">{playerName}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {guess.distance?.toFixed(0)} km away
+                      </div>
                     </div>
                   </div>
+                  <div>
+                    <Badge 
+                      className={cn(
+                        "font-mono text-md",
+                        index === 0 ? "bg-yellow-500" : "bg-primary"
+                      )}
+                    >
+                      +{guess.score}
+                    </Badge>
+                  </div>
                 </div>
-                <div>
-                  <Badge 
-                    className={cn(
-                      "font-mono text-md",
-                      index === 0 ? "bg-yellow-500" : "bg-primary"
-                    )}
-                  >
-                    +{player.roundScore}
-                  </Badge>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="text-center py-8 text-muted-foreground">

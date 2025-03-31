@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { 
   Card, CardContent, CardFooter, CardHeader, CardTitle 
@@ -8,7 +8,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription 
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Globe, Send, Copy, Share2 } from "lucide-react";
+import { ArrowLeft, Globe, Send, Copy, Share2, AlertCircle } from "lucide-react";
 import { useGameState } from "@/hooks/useGameState";
 import { cn } from "@/lib/utils";
 import StreetView from "./StreetView";
@@ -16,6 +16,10 @@ import GuessMap from "./GuessMap";
 import Timer from "./Timer";
 import PlayerList from "./PlayerList";
 import ResultsDisplay from "./ResultsDisplay";
+import GameLobby from "./GameLobby";
+import { Badge } from "@/components/ui/badge";
+import { useJsApiLoader } from '@react-google-maps/api';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const GameRoom = () => {
   const { roomId } = useParams<{ roomId: string }>();
@@ -35,6 +39,7 @@ const GameRoom = () => {
     submitGuess,
     nextRound,
     resetGame,
+    updatePlayerReadyStatus,
   } = useGameState(roomId, rounds, timeLimit);
   
   const [playerId, setPlayerId] = useState<string | null>(null);
@@ -43,328 +48,241 @@ const GameRoom = () => {
   const [showFinalResults, setShowFinalResults] = useState(false);
   const [tempGuessLocation, setTempGuessLocation] = useState<{lat: number, lng: number} | null>(null);
   const [pendingGuessLocation, setPendingGuessLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [isReady, setIsReady] = useState(false);
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  
+  const {
+    players,
+    rounds: gameRounds,
+    currentRound: currentRoundIndex,
+    hasStarted,
+    isActive,
+    timeLimit: gameStateTimeLimit
+  } = gameState;
+  
+  const currentRound = gameRounds[currentRoundIndex];
   
   const currentPlayer = playerId 
-    ? gameState.players.find(p => p.id === playerId)
+    ? players.find(p => p.id === playerId)
     : null;
-  
-  const currentRound = gameState.rounds[gameState.currentRound];
-  
+
+  // Load Google Maps API here
+  const { isLoaded: isMapApiLoaded, loadError: mapApiLoadError } = useJsApiLoader({
+    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    libraries: ['places', 'geometry'], // Include ALL needed libraries
+    version: "weekly"
+  });
+
+  // Initialize player
   useEffect(() => {
-    if (!playerId && playerName) {
-      const id = addPlayer(playerName);
+    if (!playerId) {
+      const id = addPlayer(playerName, isHost);
       setPlayerId(id);
-      
-      if (isHost && gameState.players.length === 0) {
-        setTimeout(() => {
-          startGame();
-        }, 1000);
-      }
     }
-  }, [playerName, isHost, gameState.players.length]);
-  
+  }, [playerId, playerName, isHost, addPlayer]);
+
+  // Handle ready status
+  const handleToggleReady = useCallback(() => {
+    const newReadyStatus = !isReady;
+    setIsReady(newReadyStatus);
+    if (playerId) {
+      console.log('Updating ready status:', playerId, newReadyStatus);
+      updatePlayerReadyStatus(playerId, newReadyStatus);
+    }
+  }, [isReady, playerId, updatePlayerReadyStatus]);
+
+  // Debug logging
   useEffect(() => {
-    if (currentRound?.isComplete && !showResults && gameState.isActive) {
+    console.log('Game State:', {
+      hasStarted,
+      players,
+      isHost,
+      currentPlayer
+    });
+  }, [gameState, isHost, currentPlayer]);
+
+  // Handle round completion
+  useEffect(() => {
+    if (currentRound?.isComplete && !showResults && isActive) {
       setShowResults(true);
     }
-  }, [currentRound?.isComplete, gameState.isActive]);
-  
-  const handleMapSelection = (lat: number, lng: number) => {
-    setPendingGuessLocation({lat, lng});
-  };
-  
-  const handleGuessSubmit = () => {
-    if (!playerId || hasGuessed || !pendingGuessLocation) return;
-    
-    submitGuess(playerId, pendingGuessLocation.lat, pendingGuessLocation.lng);
-    setTempGuessLocation(pendingGuessLocation);
-    setHasGuessed(true);
-    
-    toast({
-      title: "Guess Submitted",
-      description: "Your guess has been recorded",
-    });
-  };
-  
-  const handleNextRound = () => {
+  }, [currentRound?.isComplete, showResults, isActive]);
+
+  // Update the useEffect to start timer when game starts
+  useEffect(() => {
+    if (hasStarted && isActive && !hasGuessed) {
+      setIsTimerRunning(true);
+    } else {
+      setIsTimerRunning(false);
+    }
+  }, [hasStarted, isActive, hasGuessed]);
+
+  const handleGuessSubmit = useCallback(() => {
+    if (playerId && tempGuessLocation) {
+      submitGuess(playerId, tempGuessLocation);
+      setHasGuessed(true);
+    } else {
+      console.warn("Attempted to submit guess without player ID or location");
+    }
+  }, [playerId, tempGuessLocation, submitGuess]);
+
+  const handleNextRound = useCallback(() => {
     setShowResults(false);
     setHasGuessed(false);
-    setTempGuessLocation(null);
-    setPendingGuessLocation(null);
-    
-    if (gameState.currentRound >= gameState.totalRounds - 1) {
-      setShowFinalResults(true);
-    } else {
-      nextRound();
-    }
-  };
-  
-  const copyRoomLink = () => {
-    const baseUrl = window.location.origin;
-    const link = `${baseUrl}/game/${roomId}?name=`;
-    
-    navigator.clipboard.writeText(link);
-    
-    toast({
-      title: "Link Copied",
-      description: "Room link copied to clipboard",
-    });
-  };
-  
-  const handleLeaveGame = () => {
-    navigate("/");
-  };
-  
-  const handleNewGame = () => {
-    resetGame();
-    setShowFinalResults(false);
-    setHasGuessed(false);
-    setTempGuessLocation(null);
-    setPendingGuessLocation(null);
-    
-    toast({
-      title: "New Game Started",
-      description: "Starting a fresh game with the same players",
-    });
-  };
-  
-  if (!roomId) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle>Invalid Room</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p>No room ID provided. Please go back and create or join a room.</p>
-          </CardContent>
-          <CardFooter>
-            <Button onClick={() => navigate("/")} className="w-full">
-              <ArrowLeft className="mr-2 h-4 w-4" /> Back to Home
-            </Button>
-          </CardFooter>
-        </Card>
-      </div>
-    );
-  }
-  
-  if (!gameState.isActive) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-b from-accent to-background">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>Waiting Room</span>
-              <Badge className="bg-primary text-xs">
-                Room: {roomId}
-              </Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-2">
-              <h3 className="font-medium">Players ({gameState.players.length})</h3>
-              <div className="space-y-2">
-                {gameState.players.map(player => (
-                  <div key={player.id} className="p-3 bg-muted rounded-md flex items-center">
-                    <span>{player.name}</span>
-                    {player.id === playerId && (
-                      <Badge variant="outline" className="ml-2 text-xs">You</Badge>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-            
-            <div className="p-4 border rounded-md text-center space-y-2">
-              <h3 className="font-medium">Invite Friends</h3>
-              <p className="text-sm text-muted-foreground">
-                Share this room code or copy the link
-              </p>
-              <div className="flex justify-center gap-2 mt-2">
-                <Button variant="outline" size="sm" onClick={copyRoomLink}>
-                  <Copy className="mr-2 h-4 w-4" /> Copy Link
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => {
-                  if (navigator.share) {
-                    navigator.share({
-                      title: 'Join my Virtual City Guesser game!',
-                      text: `Join my game with room code: ${roomId}`,
-                      url: window.location.href.split('?')[0]
-                    });
-                  } else {
-                    copyRoomLink();
-                  }
-                }}>
-                  <Share2 className="mr-2 h-4 w-4" /> Share
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-          <CardFooter className="flex justify-between">
-            <Button variant="outline" onClick={handleLeaveGame}>
-              Leave Room
-            </Button>
-            
-            {isHost && (
-              <Button onClick={startGame} disabled={gameState.players.length < 1}>
-                Start Game
-              </Button>
-            )}
-          </CardFooter>
-        </Card>
-      </div>
-    );
-  }
-  
-  if (showFinalResults) {
-    const sortedPlayers = [...gameState.players].sort((a, b) => b.score - a.score);
-    const winner = sortedPlayers[0];
-    
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-b from-accent to-background">
-        <Card className="w-full max-w-2xl">
-          <CardHeader className="text-center">
-            <CardTitle className="text-3xl">Game Complete!</CardTitle>
-            {winner && (
-              <div className="mt-2">
-                <Badge className="bg-yellow-500 text-white">
-                  {winner.name} wins with {winner.score} points!
-                </Badge>
-              </div>
-            )}
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div>
-              <h3 className="font-medium text-lg mb-3">Final Standings</h3>
-              <div className="space-y-2">
-                {sortedPlayers.map((player, index) => (
-                  <div 
-                    key={player.id} 
-                    className={cn(
-                      "p-4 rounded-md flex items-center justify-between",
-                      index === 0 ? "bg-yellow-50 border border-yellow-200" : "bg-muted"
-                    )}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-sm font-bold">
-                        {index + 1}
-                      </div>
-                      <span className="font-medium">{player.name}</span>
-                      {player.id === playerId && (
-                        <Badge variant="outline" className="text-xs">You</Badge>
-                      )}
-                    </div>
-                    <Badge className={cn(
-                      "font-mono text-lg",
-                      index === 0 ? "bg-yellow-500" : "bg-primary"
-                    )}>
-                      {player.score}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </CardContent>
-          <CardFooter className="flex justify-between">
-            <Button variant="outline" onClick={handleLeaveGame}>
-              Exit to Menu
-            </Button>
-            
-            {isHost && (
-              <Button onClick={handleNewGame}>
-                New Game
-              </Button>
-            )}
-          </CardFooter>
-        </Card>
-      </div>
-    );
-  }
-  
-  return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-blue-50 to-cyan-50 map-pattern">
-      <header className="bg-background border-b p-3 shadow-sm">
-        <div className="container mx-auto flex items-center justify-between">
-          <div className="flex items-center">
-            <Globe className="mr-2 h-5 w-5 text-primary" />
-            <h1 className="font-bold">Virtual City Guesser</h1>
-          </div>
-          
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-xs">
-              Round {gameState.currentRound + 1}/{gameState.totalRounds}
-            </Badge>
-            <Badge variant="outline" className="text-xs">
-              Room: {roomId}
-            </Badge>
-            <Button variant="ghost" size="sm" onClick={handleLeaveGame}>
-              Exit
-            </Button>
-          </div>
-        </div>
-      </header>
-      
-      <main className="flex-1 container mx-auto py-4 px-4 lg:px-6 grid grid-cols-1 md:grid-cols-5 gap-4 items-start">
-        <div className="md:col-span-3 h-[50vh] md:h-[calc(100vh-8rem)]">
-          <StreetView 
-            position={currentRound?.location.position}
-            panoId={currentRound?.location.panoId}
-          />
-        </div>
-        
-        <div className="md:col-span-2 space-y-4 md:h-[calc(100vh-8rem)] flex flex-col">
-          <Timer 
-            seconds={currentRound?.timeRemaining || 0}
-            maxTime={currentRound?.timeLimit || 60}
-          />
-          
-          <div className="flex-1 min-h-[50vh]">
-            <GuessMap 
-              onGuess={!hasGuessed ? handleMapSelection : undefined}
-              guessLocation={currentPlayer?.guessLocation || (hasGuessed ? tempGuessLocation : undefined)}
-              actualLocation={currentRound?.isComplete ? currentRound.location.position : undefined}
-              isRevealed={currentRound?.isComplete || false}
-              disabled={hasGuessed}
-              className="h-full"
-              onSubmitGuess={handleGuessSubmit}
-            />
-          </div>
-          
-          <div className="h-48 md:h-56">
-            <PlayerList 
-              players={gameState.players}
-              currentRound={gameState.currentRound}
-              className="h-full"
-            />
-          </div>
-        </div>
-      </main>
-      
-      <Dialog open={showResults} onOpenChange={setShowResults}>
-        <DialogContent>
-          <DialogTitle>Round Results</DialogTitle>
-          <DialogDescription>See how close your guess was!</DialogDescription>
-          <ResultsDisplay 
-            players={gameState.players}
-            location={currentRound?.location}
-            onNextRound={handleNextRound}
-            isLastRound={gameState.currentRound >= gameState.totalRounds - 1}
-          />
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-};
+    nextRound();
+  }, [nextRound]);
 
-const Badge = ({ children, className, variant }: { children: React.ReactNode; className?: string; variant?: "default" | "outline" }) => {
+  const handlePlayAgain = useCallback(() => {
+    setShowFinalResults(false);
+    resetGame();
+  }, [resetGame]);
+
+  // Render lobby if game hasn't started
+  if (!hasStarted) {
+    return (
+      <GameLobby
+        roomId={roomId || ''}
+        players={players}
+        isHost={isHost}
+        currentPlayer={currentPlayer}
+        onStartGame={() => {
+          console.log('Starting game...');
+          startGame();
+        }}
+        onToggleReady={handleToggleReady}
+      />
+    );
+  }
+
+  // Loading state for API
+  if (mapApiLoadError) {
+    return (
+      <div className="container mx-auto p-4">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Map API Load Error</AlertTitle>
+          <AlertDescription>
+            Failed to load Google Maps essentials. Check your API key, network connection, and browser console.
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  if (!isMapApiLoaded) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p>Loading Map Essentials...</p>
+      </div>
+    );
+  }
+
   return (
-    <span className={cn(
-      "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold",
-      variant !== "outline" ? "bg-primary text-primary-foreground" : "border border-border bg-background",
-      className
-    )}>
-      {children}
-    </span>
+    <div className="min-h-screen flex flex-col">
+      <div className="container mx-auto p-4 flex flex-col flex-1 space-y-4">
+        <div className="flex justify-between items-center">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => navigate('/')}
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="flex items-center gap-4">
+            <Timer
+              duration={timeLimit}
+              isRunning={isTimerRunning}
+              onComplete={handleGuessSubmit}
+            />
+            <PlayerList 
+              players={players} 
+              currentRound={currentRoundIndex}
+            />
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-4 flex-grow">
+          <Card className="md:col-span-1 md:row-span-2 order-1 md:order-1">
+            <CardContent className="p-0 h-[60vh] md:h-full">
+              <StreetView
+                position={currentRound?.target}
+                onLoad={() => console.log('Street view loaded')}
+                isLoaded={isMapApiLoaded}
+                loadError={mapApiLoadError}
+              />
+            </CardContent>
+          </Card>
+
+          <Card className="md:col-span-1 md:row-span-2 order-2 md:order-2 flex flex-col">
+            <GuessMap
+              onLocationSelect={setTempGuessLocation}
+              selectedLocation={tempGuessLocation}
+              disabled={hasGuessed || showResults || !isActive}
+              onSubmitGuess={handleGuessSubmit}
+              isRevealed={showResults}
+              actualLocation={currentRound?.target}
+              className="flex-grow"
+              isLoaded={isMapApiLoaded}
+              loadError={mapApiLoadError}
+            />
+          </Card>
+
+          {showResults && currentRound && (
+            <Dialog open={showResults} onOpenChange={setShowResults}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Round {currentRoundIndex + 1} Results</DialogTitle>
+                </DialogHeader>
+                <ResultsDisplay
+                  location={currentRound.target}
+                  players={players}
+                  guesses={currentRound.guesses}
+                  onNextRound={handleNextRound}
+                  isLastRound={currentRoundIndex >= gameState.rounds.length - 1}
+                />
+              </DialogContent>
+            </Dialog>
+          )}
+
+          {!isActive && hasStarted && (
+            <Dialog open={!isActive} onOpenChange={() => {}}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Game Complete!</DialogTitle>
+                  <DialogDescription>
+                    Here are the final results
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  {players
+                    .sort((a, b) => b.score - a.score)
+                    .map((player, index) => (
+                      <div
+                        key={player.id}
+                        className="flex items-center justify-between p-4 bg-secondary rounded-lg"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span>{index + 1}.</span>
+                          <span>{player.name}</span>
+                          {index === 0 && (
+                            <Badge variant="outline">Winner!</Badge>
+                          )}
+                        </div>
+                        <span>{player.score} points</span>
+                      </div>
+                    ))}
+                </div>
+                <DialogFooter>
+                  <Button onClick={handlePlayAgain}>
+                    Play Again
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
+        </div>
+      </div>
+    </div>
   );
 };
 

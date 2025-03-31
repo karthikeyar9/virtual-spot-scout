@@ -1,36 +1,54 @@
-
 import React, { useEffect, useState } from "react";
 import { Clock } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 
 interface TimerProps {
-  seconds: number;
-  maxTime: number;
+  duration: number;
+  isRunning: boolean;
   onComplete?: () => void;
   className?: string;
 }
 
-const Timer = ({ seconds, maxTime, onComplete, className }: TimerProps) => {
+const Timer: React.FC<TimerProps> = ({
+  duration,
+  isRunning,
+  onComplete,
+  className
+}) => {
+  const [timeLeft, setTimeLeft] = useState(duration);
   const [progressValue, setProgressValue] = useState(100);
 
   useEffect(() => {
-    // Convert remaining seconds to a percentage of the maximum time
-    const percentage = (seconds / maxTime) * 100;
-    setProgressValue(percentage);
-  }, [seconds, maxTime]);
+    setTimeLeft(duration);
+    setProgressValue(100);
+  }, [duration]);
 
   useEffect(() => {
-    if (seconds <= 0 && onComplete) {
+    let timer: NodeJS.Timeout;
+
+    if (isRunning && timeLeft > 0) {
+      timer = setInterval(() => {
+        setTimeLeft((prev) => {
+          const newTime = prev - 1;
+          setProgressValue((newTime / duration) * 100);
+          return newTime;
+        });
+      }, 1000);
+    } else if (timeLeft === 0 && onComplete) {
       onComplete();
     }
-  }, [seconds, onComplete]);
 
-  // Format seconds into MM:SS
-  const formatTime = (totalSeconds: number) => {
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [isRunning, timeLeft, duration, onComplete]);
+
+  // Format time as MM:SS
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   // Determine color based on time remaining
@@ -41,14 +59,14 @@ const Timer = ({ seconds, maxTime, onComplete, className }: TimerProps) => {
   };
 
   return (
-    <div className={cn("space-y-2", className)}>
+    <div className={cn("space-y-2 min-w-[200px]", className)}>
       <div className="flex items-center justify-between">
         <div className="flex items-center">
           <Clock className="mr-2 h-4 w-4" />
           <span className="font-medium">Time Remaining</span>
         </div>
         <span className="font-mono text-lg font-medium">
-          {formatTime(seconds)}
+          {formatTime(timeLeft)}
         </span>
       </div>
       <Progress 
