@@ -180,7 +180,7 @@ const GameRoom = () => {
   return (
     <div className="min-h-screen flex flex-col">
       <div className="container mx-auto p-4 flex flex-col flex-1 space-y-4">
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center flex-shrink-0">
           <Button
             variant="outline"
             size="icon"
@@ -201,9 +201,9 @@ const GameRoom = () => {
           </div>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-4 flex-grow">
-          <Card className="md:col-span-1 md:row-span-2 order-1 md:order-1">
-            <CardContent className="p-0 h-[60vh] md:h-full">
+        <div className="flex-grow grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Card className="md:col-span-1 md:row-span-2 order-1 flex flex-col">
+            <CardContent className="p-0 flex-grow min-h-[40vh] md:min-h-0">
               <StreetView
                 position={currentRound?.target}
                 onLoad={() => console.log('Street view loaded')}
@@ -213,7 +213,7 @@ const GameRoom = () => {
             </CardContent>
           </Card>
 
-          <Card className="md:col-span-1 md:row-span-2 order-2 md:order-2 flex flex-col">
+          <Card className="md:col-span-1 md:row-span-2 order-2 flex flex-col">
             <GuessMap
               onLocationSelect={setTempGuessLocation}
               selectedLocation={tempGuessLocation}
@@ -221,7 +221,7 @@ const GameRoom = () => {
               onSubmitGuess={handleGuessSubmit}
               isRevealed={showResults}
               actualLocation={currentRound?.target}
-              className="flex-grow"
+              className="flex-grow min-h-[40vh] md:min-h-0"
               isLoaded={isMapApiLoaded}
               loadError={mapApiLoadError}
             />

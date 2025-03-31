@@ -45,7 +45,7 @@ const ResultsDisplay = ({ players, guesses, location, onNextRound, isLastRound }
               const playerName = playerMap.get(guess.playerId) || 'Unknown Player';
               return (
                 <div 
-                  key={guess.playerId}
+                  key={`${guess.playerId}-${index}`}
                   className={cn(
                     "flex items-center justify-between p-3 rounded-md",
                     index === 0 ? "bg-yellow-50 border border-yellow-200" : "bg-background border border-border"

@@ -170,22 +170,23 @@ const GuessMap: React.FC<GuessMapProps> = ({
           </GoogleMap>
         )}
         
-        {!isRevealed && !disabled && (
-          <div className="absolute bottom-4 left-4 right-4 bg-background/80 backdrop-blur-sm p-3 rounded-md text-sm text-center z-10 pointer-events-none">
-            {selectedLocation ? (
-              <p>Click map to change guess, or Submit below</p>
-            ) : (
-              <p>Click anywhere on the map to make your guess</p>
-            )}
-          </div>
-        )}
-        
         {isRevealed && distance !== null && (
           <div className="absolute top-4 right-4 bg-background/80 backdrop-blur-sm p-2 rounded-md text-sm font-semibold z-10">
             Distance: {distance} km
           </div>
         )}
       </CardContent>
+
+      {!isRevealed && !disabled && (
+        <div className="p-3 border-t text-center text-sm text-muted-foreground bg-muted/20">
+          {selectedLocation ? (
+            <span>Click map to change guess, or Submit below</span>
+          ) : (
+            <span>Click anywhere on the map to make your guess</span>
+          )}
+        </div>
+      )}
+
       <CardFooter className="p-3 flex justify-between items-center border-t bg-muted/40">
         <div className="flex items-center gap-2 text-sm min-w-0">
           <MapPin className="h-4 w-4 flex-shrink-0" />
@@ -196,7 +197,7 @@ const GuessMap: React.FC<GuessMapProps> = ({
           </span>
         </div>
         <Button
-          onClick={onSubmitGuess} 
+          onClick={onSubmitGuess}
           disabled={!selectedLocation || disabled || isRevealed}
           size="sm"
         >
