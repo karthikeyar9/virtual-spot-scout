@@ -137,6 +137,13 @@ const GameRoom = () => {
     resetGame();
   }, [resetGame]);
 
+  // useEffect hook to show final results when game becomes inactive
+  useEffect(() => {
+    if (!isActive && hasStarted) {
+      setShowFinalResults(true);
+    }
+  }, [isActive, hasStarted]);
+
   // Render lobby if game hasn't started
   if (!hasStarted) {
     return (
@@ -244,8 +251,8 @@ const GameRoom = () => {
             </Dialog>
           )}
 
-          {!isActive && hasStarted && (
-            <Dialog open={!isActive} onOpenChange={() => {}}>
+          {hasStarted && (
+            <Dialog open={showFinalResults} onOpenChange={setShowFinalResults}>
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Game Complete!</DialogTitle>
@@ -253,22 +260,25 @@ const GameRoom = () => {
                     Here are the final results
                   </DialogDescription>
                 </DialogHeader>
-                <div className="space-y-4">
+                <div className="space-y-4 max-h-[60vh] overflow-y-auto">
                   {players
                     .sort((a, b) => b.score - a.score)
                     .map((player, index) => (
                       <div
                         key={player.id}
-                        className="flex items-center justify-between p-4 bg-secondary rounded-lg"
+                        className={cn(
+                          "flex items-center justify-between p-3 rounded-md",
+                          index === 0 ? "bg-yellow-100 border border-yellow-300" : "bg-secondary/80"
+                        )}
                       >
                         <div className="flex items-center gap-2">
-                          <span>{index + 1}.</span>
+                          <span className="font-bold w-5 text-center">{index + 1}.</span>
                           <span>{player.name}</span>
                           {index === 0 && (
-                            <Badge variant="outline">Winner!</Badge>
+                            <Badge variant="outline" className="border-yellow-600 text-yellow-700">Winner!</Badge>
                           )}
                         </div>
-                        <span>{player.score} points</span>
+                        <span className="font-semibold">{player.score} points</span>
                       </div>
                     ))}
                 </div>
