@@ -3,8 +3,24 @@ import { io, Socket } from 'socket.io-client';
 import { SocketContext } from './socket';
 import { useToast } from '@/hooks/use-toast';
 
-// Define the socket server URL - ensure this matches your server port
-const SOCKET_SERVER_URL = import.meta.env.VITE_SOCKET_SERVER_URL || 'http://localhost:3001';
+// Get the environment-specific server URL
+const getServerUrl = () => {
+  // Production environment (deployed on Render)
+  if (import.meta.env.PROD) {
+    return 'https://virtual-city-guess-backend.onrender.com/';
+  }
+  
+  // Use environment variable if available
+  if (import.meta.env.VITE_SOCKET_SERVER_URL) {
+    return import.meta.env.VITE_SOCKET_SERVER_URL;
+  }
+  
+  // Default development URL
+  return 'http://localhost:3001';
+};
+
+// Define the socket server URL
+const SOCKET_SERVER_URL = getServerUrl();
 
 export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -15,9 +31,10 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     console.log('🔄 Socket Provider: Initializing...');
     console.log('📡 Attempting connection to:', SOCKET_SERVER_URL);
-    console.log('🔧 Environment variables:', {
+    console.log('🔧 Environment:', {
+      isProd: import.meta.env.PROD,
       VITE_SOCKET_SERVER_URL: import.meta.env.VITE_SOCKET_SERVER_URL,
-      fallbackURL: 'http://localhost:3001'
+      resolvedURL: SOCKET_SERVER_URL
     });
     
     try {
@@ -28,7 +45,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         timeout: 10000,
         transports: ['websocket', 'polling'],
         forceNew: true,
-        withCredentials: false, // Changed to false since we're using '*' for CORS
+        withCredentials: false,
         autoConnect: true,
         path: '/socket.io' // Explicitly set the socket.io path
       });
@@ -70,7 +87,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         
         toast({
           title: "Connection Error",
-          description: `Could not connect to game server: ${err.message}. Please ensure the server is running on port 3001.`,
+          description: `Could not connect to game server: ${err.message}`,
           variant: "destructive",
         });
       });

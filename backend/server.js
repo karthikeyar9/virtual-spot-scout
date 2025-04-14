@@ -8,9 +8,29 @@ const app = express();
 
 console.log('🚀 Initializing server...');
 
+// Allow production frontend URL and localhost
+const allowedOrigins = [
+  'https://virtual-city-guesser.vercel.app', // Vercel frontend
+  'http://localhost:8080',
+  'http://localhost:3000',
+  'https://virtual-city-guess-backend.onrender.com',
+  // For local testing of the Render deployment
+  'http://localhost:10000'
+];
+
 // Enable CORS with specific options
 const corsOptions = {
-  origin: ['http://localhost:8080', 'http://localhost:3000'], // Allow both dev ports
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, curl, etc)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log(`🚫 CORS blocked request from: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'OPTIONS'],
   credentials: false
 };
@@ -28,7 +48,19 @@ const io = new Server(server, {
   transports: ['websocket', 'polling'],
   pingTimeout: 60000,
   pingInterval: 25000,
-  path: '/socket.io'
+  path: '/socket.io',
+  // Handle serverless environments
+  adapter: process.env.VERCEL ? {
+    name: 'vercel-adapter',
+    // On Vercel, every instance is a separate function
+    // so we need to make sure this works without Redis
+    rooms: new Map(),
+    sids: new Map(),
+    emit(packet, opts) {
+      // Default emit behavior
+      return false;
+    }
+  } : undefined
 });
 
 console.log('🔌 Socket.IO configuration:', {
@@ -43,6 +75,11 @@ console.log('🔌 Socket.IO configuration:', {
 app.get('/', (req, res) => {
   console.log('📥 Received request to root endpoint');
   res.send('Virtual City Guesser server is running!');
+});
+
+// Health check endpoint for Vercel
+app.get('/api/health', (req, res) => {
+  res.status(200).send({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // Define the port
@@ -344,14 +381,21 @@ io.on('connection', (socket) => {
   });
 });
 
-// Start the server
-server.listen(PORT, () => {
-  console.log(`
-🎮 Virtual City Guesser Server
+// For Vercel serverless environment, we need to check if the code is running in a serverless function
+if (process.env.VERCEL) {
+  // In Vercel, export the app instead of starting the server
+  module.exports = app;
+} else {
+  // Start the server normally in development or on Render
+  const serverPort = process.env.PORT || 3001;
+  server.listen(serverPort, () => {
+    console.log(`
+🎮 Virtual Spot Scout Server
 -----------------------------
-✅ Server is running on port ${PORT}
-🌐 Visit http://localhost:${PORT} to verify server is running
+✅ Server is running on port ${serverPort}
+🌐 Visit http://localhost:${serverPort} to verify server is running
 📡 WebSocket server is ready
-🔒 CORS is configured for localhost:8080 and localhost:3000
-  `);
-}); 
+🔒 CORS is configured for allowed origins
+    `);
+  });
+} 

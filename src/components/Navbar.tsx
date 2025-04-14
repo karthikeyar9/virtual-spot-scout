@@ -84,10 +84,10 @@ const Navbar: React.FC<NavbarProps> = ({ onRestartGame, roomId }) => {
                       Restart Game
                     </DropdownMenuItem>
                   )}
-                  <DropdownMenuItem onClick={() => window.open('https://github.com/username/virtual-spot-scout', '_blank')}>
+                  {/* <DropdownMenuItem onClick={() => window.open('https://github.com/username/virtual-spot-scout', '_blank')}>
                     <Info className="h-4 w-4 mr-2" />
                     About
-                  </DropdownMenuItem>
+                  </DropdownMenuItem> */}
                 </DropdownMenuContent>
               </DropdownMenu>
             </>
