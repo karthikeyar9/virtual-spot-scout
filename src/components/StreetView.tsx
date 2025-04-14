@@ -1,85 +1,178 @@
-import React, { useEffect, useRef, useState } from "react";
-import { AlertCircle } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { AlertCircle } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 
 interface StreetViewProps {
-  position?: {
-    lat: number;
-    lng: number;
-  };
+  position: { lat: number; lng: number } | undefined;
   onLoad?: () => void;
   isLoaded: boolean;
-  loadError?: Error | null;
+  loadError: Error | undefined;
+  onError?: (error: Error) => void;
 }
 
-const StreetView: React.FC<StreetViewProps> = ({ position, onLoad, isLoaded, loadError }) => {
-  const mapRef = useRef<HTMLDivElement>(null);
+const StreetView: React.FC<StreetViewProps> = ({ 
+  position, 
+  onLoad, 
+  isLoaded, 
+  loadError,
+  onError
+}) => {
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const mapRef = useRef<HTMLDivElement>(null);
+  const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
 
+  // Initialize or update Street View when position changes or maps API loads
   useEffect(() => {
-    if (!isLoaded || !mapRef.current || !position) return;
+    if (!isLoaded || !position || !mapRef.current) return;
 
     const initStreetView = async () => {
       try {
-        const streetViewService = new google.maps.StreetViewService();
-        const data = await streetViewService.getPanorama({
-          location: position,
-          radius: 1000,
-          source: google.maps.StreetViewSource.OUTDOOR
+        // Clean up previous panorama if it exists
+        if (panoramaRef.current) {
+          panoramaRef.current = null;
+        }
+
+        // Create a new Street View panorama
+        const panorama = new google.maps.StreetViewPanorama(mapRef.current, {
+          position: position,
+          pov: { heading: 0, pitch: 0 },
+          addressControl: false,
+          fullscreenControl: false,
+          enableCloseButton: false,
+          showRoadLabels: false,
+          zoomControl: true,
+          panControl: true,
+          motionTracking: false,
+          motionTrackingControl: false,
+          linksControl: false,
+          clickToGo: false,
+          disableDefaultUI: false,
+          visible: true
         });
 
-        if (data.data && data.data.location && data.data.location.latLng) {
-          const panorama = new google.maps.StreetViewPanorama(mapRef.current!, {
-            position: data.data.location.latLng,
-            pov: { heading: 0, pitch: 0 },
-            addressControl: false,
-            showRoadLabels: false,
-            zoomControl: true,
-            fullscreenControl: false,
-            motionTracking: false,
-            motionTrackingControl: false,
-            enableCloseButton: false,
-            visible: true
-          });
-          if (onLoad) onLoad();
-        } else {
-          console.error('No suitable Street View panorama found.');
-          setError('Street View is not available for this location.');
+        // Store reference to the panorama
+        panoramaRef.current = panorama;
+        
+        // Call the parent onLoad callback if provided
+        if (onLoad) {
+          onLoad();
         }
-      } catch (err) {
-        console.error('Street View initialization error:', err);
-        setError('Failed to load Street View. Please try again.');
+
+        // Setup error event listener
+        const streetViewService = new google.maps.StreetViewService();
+        streetViewService.getPanorama({
+          location: position,
+          radius: 50 // Search within 50 meters
+        }).then(() => {
+          console.log('Street View panorama available for this location');
+        }).catch((e) => {
+          console.error('Street View error:', e);
+          setError('No Street View imagery available for this location');
+          if (onError) {
+            onError(new Error(e.message || 'Street View not available'));
+          }
+        });
+
+      } catch (e) {
+        console.error('Street View initialization error:', e);
+        setError('Failed to initialize Street View');
+        if (onError) {
+          onError(e instanceof Error ? e : new Error('Unknown error'));
+        }
       }
     };
 
     initStreetView();
-  }, [isLoaded, position, onLoad]);
 
-  if (!isLoaded) {
+    // Cleanup function
+    return () => {
+      if (panoramaRef.current) {
+        panoramaRef.current = null;
+      }
+    };
+  }, [isLoaded, position, onLoad, onError]);
+
+  // Reset error state when position changes
+  useEffect(() => {
+    setError(null);
+    setIsRetrying(false);
+  }, [position]);
+
+  // Retry loading Street View
+  const handleRetry = useCallback(() => {
+    setError(null);
+    setIsRetrying(true);
+    setRetryCount(prev => prev + 1);
+    
+    // After a brief delay, reset the retrying state
+    setTimeout(() => {
+      setIsRetrying(false);
+    }, 1000);
+  }, []);
+
+  if (!isLoaded || !position) {
     return (
-      <Card className="flex items-center justify-center h-full">
-        <CardContent className="p-4 text-center">
-          <p>Loading Street View...</p>
-        </CardContent>
-      </Card>
+      <div className="w-full h-full bg-gray-100 flex items-center justify-center">
+        <p>Loading Street View...</p>
+      </div>
     );
   }
-  
-  if (error) {
-      return (
+
+  if (loadError) {
+    return (
+      <div className="w-full h-full bg-gray-100 flex items-center justify-center p-4">
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Street View Error</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertTitle>Google Maps Error</AlertTitle>
+          <AlertDescription>
+            {loadError.message}. Please check your API key and network connection.
+          </AlertDescription>
         </Alert>
-      );
-    }
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="w-full h-full bg-gray-100 flex flex-col items-center justify-center p-4">
+        <Alert variant="destructive" className="mb-4">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Street View Error</AlertTitle>
+          <AlertDescription>
+            {error}. This location might not have Street View coverage.
+          </AlertDescription>
+        </Alert>
+        <div className="flex gap-2">
+          <Button 
+            variant="default" 
+            onClick={handleRetry}
+            disabled={isRetrying}
+          >
+            {isRetrying ? "Retrying..." : "Retry"}
+          </Button>
+          <Button 
+            variant="outline" 
+            onClick={() => {
+              // Notify parent component to skip to next location
+              if (onError) {
+                onError(new Error("SKIP_TO_NEXT_LOCATION"));
+              }
+            }}
+          >
+            Skip to Next Location
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div 
       ref={mapRef} 
-      className="w-full h-full rounded-lg overflow-hidden bg-muted"
+      className="h-full w-full bg-gray-100"
     />
   );
 };

@@ -44,7 +44,7 @@ export const streetViewLocations = [
   
   // Russia - Iconic Places
   { lat: 55.752023, lng: 37.617499 },      // Kremlin, Moscow
-  { lat: 55.750446, lng: 37.617494 },      // St. Basil’s Cathedral
+  { lat: 55.750446, lng: 37.617494 },      // St. Basil's Cathedral
   { lat: 59.934280, lng: 30.335099 },      // Hermitage Museum, Saint Petersburg
   { lat: 55.752220, lng: 37.615560 },      // Bolshoi Theatre, Moscow
   
@@ -107,9 +107,57 @@ export const streetViewLocations = [
   { lat: 39.904202, lng: 116.407394 },    // Forbidden City, Beijing
 ];
 
+// Add more reliable street view locations (these tend to have better coverage)
+const reliableStreetViewLocations = [
+  // Major downtown areas in the US
+  { lat: 40.755603, lng: -73.984931 },    // Manhattan, New York (Times Square area)
+  { lat: 34.050536, lng: -118.249851 },   // Downtown Los Angeles
+  { lat: 41.878440, lng: -87.629976 },    // Chicago Loop
+  { lat: 37.786695, lng: -122.404849 },   // San Francisco Financial District
+  { lat: 29.760118, lng: -95.369728 },    // Downtown Houston
+  { lat: 33.760142, lng: -84.390363 },    // Downtown Atlanta
+  { lat: 25.773874, lng: -80.193291 },    // Miami Downtown
+  { lat: 32.781078, lng: -96.797221 },    // Downtown Dallas
+  { lat: 39.952464, lng: -75.164106 },    // Center City, Philadelphia
+  { lat: 47.605237, lng: -122.330833 },   // Downtown Seattle
+  
+  // Major European cities with excellent coverage
+  { lat: 48.856663, lng: 2.351556 },      // Paris city center
+  { lat: 51.507322, lng: -0.127647 },     // Central London
+  { lat: 41.890209, lng: 12.492231 },     // Rome historic center
+  { lat: 52.520008, lng: 13.404954 },     // Berlin Mitte
+  { lat: 40.416705, lng: -3.703582 },     // Madrid city center
+  { lat: 48.208727, lng: 16.372356 },     // Vienna city center
+  { lat: 52.372166, lng: 4.891565 },      // Amsterdam Canal Ring
+  { lat: 41.385063, lng: 2.173404 },      // Barcelona Gothic Quarter
+  { lat: 59.329323, lng: 18.068581 },     // Stockholm Old Town
+  { lat: 50.075539, lng: 14.437800 },     // Prague Old Town
+  
+  // Tourist areas with excellent coverage
+  { lat: 21.281624, lng: -157.837222 },   // Waikiki, Honolulu
+  { lat: 36.115643, lng: -115.172829 },   // Las Vegas Strip
+  { lat: 28.418777, lng: -80.607143 },    // Cape Canaveral
+  { lat: 43.077831, lng: -70.760361 },    // Portsmouth, NH (historic district)
+  { lat: 21.958445, lng: -159.367310 },   // Poipu Beach, Kauai
+  { lat: 33.812092, lng: -117.918974 },   // Disneyland area, Anaheim
+  { lat: 35.446404, lng: 139.642538 },    // Yokohama Waterfront
+  { lat: 22.396428, lng: 114.109497 },    // Hong Kong Victoria Harbour
+  { lat: 40.802535, lng: 14.426892 },     // Pompei ruins, Italy
+  { lat: -33.856784, lng: 151.215297 },   // Sydney Opera House area
+];
 
-// Function to get random locations from the predefined list
+// Function to get random locations from the predefined list with fallbacks
 export function getRandomLocations(count: number) {
-  const shuffled = [...streetViewLocations].sort(() => 0.5 - Math.random());
-  return shuffled.slice(0, count);
+  // Combine the lists but prioritize reliable locations
+  const combinedLocations = [...reliableStreetViewLocations, ...streetViewLocations];
+  
+  // Make sure we don't have duplicates
+  const uniqueLocations = [...new Map(combinedLocations.map(item => 
+    [JSON.stringify(item), item])).values()];
+    
+  // Shuffle the array
+  const shuffled = uniqueLocations.sort(() => 0.5 - Math.random());
+  
+  // Get more locations than requested to have backups
+  return shuffled.slice(0, count * 2);
 } 

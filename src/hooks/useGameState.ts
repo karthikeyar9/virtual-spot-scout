@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { getRandomLocations } from '@/utils/locations';
 
@@ -35,12 +35,55 @@ export interface GameState {
   hasStarted: boolean;
   isActive: boolean;
   timeLimit: number;
+  savedPlayerInfo?: SavedPlayerInfo | null;
 }
 
+interface SavedPlayerInfo {
+  playerId: string;
+  roomId: string;
+  playerName: string;
+  isHost: boolean;
+}
+
+// Helper functions for localStorage
+const savePlayerInfo = (roomId: string, playerId: string, playerName: string, isHost: boolean) => {
+  try {
+    const playerInfo: SavedPlayerInfo = { roomId, playerId, playerName, isHost };
+    localStorage.setItem('playerInfo', JSON.stringify(playerInfo));
+    console.log('✅ Player info saved to localStorage:', playerInfo);
+  } catch (error) {
+    console.error('❌ Error saving player info to localStorage:', error);
+  }
+};
+
+const getPlayerInfo = (): SavedPlayerInfo | null => {
+  try {
+    const playerInfo = localStorage.getItem('playerInfo');
+    if (playerInfo) {
+      return JSON.parse(playerInfo);
+    }
+  } catch (error) {
+    console.error('❌ Error retrieving player info from localStorage:', error);
+  }
+  return null;
+};
+
+const clearPlayerInfo = () => {
+  try {
+    localStorage.removeItem('playerInfo');
+    console.log('🧹 Player info cleared from localStorage');
+  } catch (error) {
+    console.error('❌ Error clearing player info from localStorage:', error);
+  }
+};
+
 export const useGameState = (roomId: string | undefined, totalRounds: number = 5, timeLimit: number = 60) => {
+  // Get more locations than needed to have backups
+  const allLocations = getRandomLocations(totalRounds);
+  
   const [gameState, setGameState] = useState<GameState>({
     players: [],
-    rounds: getRandomLocations(totalRounds).map(location => ({
+    rounds: allLocations.slice(0, totalRounds).map(location => ({
       target: location,
       guesses: [],
       isComplete: false
@@ -51,20 +94,66 @@ export const useGameState = (roomId: string | undefined, totalRounds: number = 5
     timeLimit
   });
 
-  const addPlayer = useCallback((name: string, isHost: boolean = false) => {
-    const playerId = uuidv4();
+  // Store backup locations
+  const [backupLocations, setBackupLocations] = useState<{lat: number, lng: number}[]>(
+    allLocations.slice(totalRounds)
+  );
+
+  // Get saved player info on initial load
+  const [savedPlayerInfo, setSavedPlayerInfo] = useState<SavedPlayerInfo | null>(null);
+  
+  // Update gameState when savedPlayerInfo changes
+  useEffect(() => {
+    setGameState(prev => ({
+      ...prev,
+      savedPlayerInfo
+    }));
+  }, [savedPlayerInfo]);
+  
+  useEffect(() => {
+    const playerInfo = getPlayerInfo();
+    console.log('🔍 Retrieved player info:', playerInfo);
+    
+    if (playerInfo) {
+      // If we're in the same room as our saved info, we can use it
+      if (playerInfo.roomId === roomId) {
+        console.log('🔄 Rejoining previous room with saved player info');
+        setSavedPlayerInfo(playerInfo);
+      } else {
+        // If we're in a different room, clear the saved info
+        console.log('🔄 Joining new room, clearing previous player info');
+        clearPlayerInfo();
+      }
+    }
+  }, [roomId]);
+
+  const addPlayer = useCallback((name: string, isHost: boolean = false, existingPlayerId?: string) => {
+    const playerId = existingPlayerId || uuidv4();
+    
+    console.log('🧩 Adding player to game state:', {
+      playerId,
+      name,
+      isHost
+    });
+    
     setGameState(prev => ({
       ...prev,
       players: [...prev.players, { 
         id: playerId, 
-        name, 
+        name: name, 
         score: 0, 
         isHost,
         isReady: isHost
       }]
     }));
+    
+    // Save player info to localStorage for persistence
+    if (roomId) {
+      savePlayerInfo(roomId, playerId, name, isHost);
+    }
+    
     return playerId;
-  }, []);
+  }, [roomId]);
 
   const updatePlayerReadyStatus = useCallback((playerId: string, isReady: boolean) => {
     setGameState(prev => ({
@@ -128,6 +217,36 @@ export const useGameState = (roomId: string | undefined, totalRounds: number = 5
     });
   }, []);
 
+  // Add a function to skip to a backup location
+  const skipToBackupLocation = useCallback((roundIndex: number) => {
+    if (backupLocations.length === 0) {
+      console.warn("No backup locations available");
+      return false;
+    }
+
+    setGameState(prev => {
+      const updatedRounds = [...prev.rounds];
+      // Replace the current location with a backup
+      const backupLocation = backupLocations[0];
+      
+      updatedRounds[roundIndex] = {
+        ...updatedRounds[roundIndex],
+        target: backupLocation,
+        guesses: [] // Reset guesses for the new location
+      };
+
+      return {
+        ...prev,
+        rounds: updatedRounds
+      };
+    });
+
+    // Remove the used backup location
+    setBackupLocations(prev => prev.slice(1));
+    
+    return true;
+  }, [backupLocations]);
+
   const nextRound = useCallback(() => {
     setGameState(prev => {
       const nextRoundIndex = prev.currentRound + 1;
@@ -137,7 +256,7 @@ export const useGameState = (roomId: string | undefined, totalRounds: number = 5
         ...prev,
         currentRound: nextRoundIndex,
         isActive: !isGameComplete,
-        // Reset temporary round-specific player data (important for the OLD approach, safe to keep for now)
+        // Reset temporary round-specific player data
         players: prev.players.map(p => ({ ...p, roundScore: undefined, distanceToTarget: undefined }))
       };
     });
@@ -158,6 +277,19 @@ export const useGameState = (roomId: string | undefined, totalRounds: number = 5
     }));
   }, [totalRounds]);
 
+  // Add setPlayers function to update player list from server
+  const setPlayers = useCallback((players: Player[]) => {
+    setGameState(prev => ({
+      ...prev,
+      players
+    }));
+  }, []);
+
+  // Add function to completely leave the game
+  const leaveGame = useCallback(() => {
+    clearPlayerInfo();
+  }, []);
+
   return {
     gameState,
     addPlayer,
@@ -165,7 +297,11 @@ export const useGameState = (roomId: string | undefined, totalRounds: number = 5
     startGame,
     submitGuess,
     nextRound,
-    resetGame
+    resetGame,
+    setPlayers,
+    leaveGame,
+    savedPlayerInfo,
+    skipToBackupLocation
   };
 };
 

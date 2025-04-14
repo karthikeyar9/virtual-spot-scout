@@ -94,7 +94,7 @@ const ResultsDisplay = ({ players, guesses, location, onNextRound, isLastRound }
 
             {/* Player guess markers and lines */}
             {sortedGuesses.map((guess, index) => (
-              <React.Fragment key={guess.playerId}>
+              <React.Fragment key={`${guess.playerId}-marker-${index}`}>
                 <Marker
                   position={guess.location}
                   label={{
@@ -104,6 +104,7 @@ const ResultsDisplay = ({ players, guesses, location, onNextRound, isLastRound }
                   }}
                 />
                 <Polyline
+                  key={`${guess.playerId}-line-${index}`}
                   path={[location, guess.location]}
                   options={{
                     strokeColor: index === 0 ? "#eab308" : "#6b7280",

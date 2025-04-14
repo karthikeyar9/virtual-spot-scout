@@ -1,5 +1,4 @@
-
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,13 +12,29 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { Clock, User } from "lucide-react";
+import { useSocket } from "@/hooks/useSocket";
+import { v4 as uuidv4 } from 'uuid';
+import { useToast } from "@/hooks/use-toast";
 
 const RoomCreation = () => {
   const navigate = useNavigate();
+  const { socket, isConnected, error } = useSocket();
+  const { toast } = useToast();
   const [playerName, setPlayerName] = useState("");
   const [rounds, setRounds] = useState(5);
   const [timeLimit, setTimeLimit] = useState(60);
   const [isCreating, setIsCreating] = useState(false);
+
+  // Show connection error toast when socket connection fails
+  useEffect(() => {
+    if (error) {
+      toast({
+        title: "Connection Error",
+        description: "Could not connect to the game server. Please try again later.",
+        variant: "destructive",
+      });
+    }
+  }, [error, toast]);
 
   const handleCreateRoom = (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,11 +48,28 @@ const RoomCreation = () => {
     // Generate a room ID
     const roomId = `room-${Math.floor(Math.random() * 10000)}`;
     
-    // In a real app, we would create the room on a backend here
-    // For now, we'll just navigate to the game room with params
-    setTimeout(() => {
-      navigate(`/game/${roomId}?name=${encodeURIComponent(playerName)}&rounds=${rounds}&time=${timeLimit}&host=true`);
-    }, 1000);
+    // Generate a unique player ID
+    const playerId = uuidv4();
+    
+    if (socket && isConnected) {
+      // Register the room and player with the socket server
+      socket.emit('joinRoom', {
+        roomId,
+        playerName,
+        playerId,
+        isHost: true
+      });
+      
+      // Navigate to the game room with params
+      navigate(`/game/${roomId}?name=${encodeURIComponent(playerName)}&rounds=${rounds}&time=${timeLimit}&host=true&playerId=${playerId}`);
+    } else {
+      toast({
+        title: "Connection Error",
+        description: "Could not connect to the game server. Please check your connection and try again.",
+        variant: "destructive",
+      });
+      setIsCreating(false);
+    }
   };
 
   return (

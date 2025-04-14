@@ -1,18 +1,31 @@
-
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { User, Hash } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useSocket } from "@/hooks/useSocket";
+import { v4 as uuidv4 } from 'uuid';
 
 const JoinRoom = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { socket, isConnected, error } = useSocket();
   const [playerName, setPlayerName] = useState("");
   const [roomId, setRoomId] = useState("");
   const [isJoining, setIsJoining] = useState(false);
+
+  // Show connection error toast when socket connection fails
+  useEffect(() => {
+    if (error) {
+      toast({
+        title: "Connection Error",
+        description: "Could not connect to the game server. Please try again later.",
+        variant: "destructive",
+      });
+    }
+  }, [error, toast]);
 
   const handleJoinRoom = (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,26 +36,29 @@ const JoinRoom = () => {
     
     setIsJoining(true);
     
-    // In a real app, we would verify the room exists on a backend here
-    // For now, we'll just navigate to the room with a small delay
-    setTimeout(() => {
-      // Here we would check if the room exists
-      // For demo purposes, we'll just simulate success
+    // Use socket connection to join the room
+    if (socket && isConnected) {
+      // Generate a unique player ID
+      const playerId = uuidv4();
       
-      // Simulating room existence check
-      const roomExists = true; // This would be a backend check
+      console.log('Emitting joinRoom event:', { roomId, playerName, playerId });
+      socket.emit('joinRoom', { 
+        roomId, 
+        playerName, 
+        playerId,
+        isHost: false 
+      });
       
-      if (roomExists) {
-        navigate(`/game/${roomId}?name=${encodeURIComponent(playerName)}`);
-      } else {
-        toast({
-          title: "Room Not Found",
-          description: "The room ID you entered doesn't exist",
-          variant: "destructive",
-        });
-        setIsJoining(false);
-      }
-    }, 1000);
+      // Navigate to the room with playerId as a parameter
+      navigate(`/game/${roomId}?name=${encodeURIComponent(playerName)}&playerId=${playerId}`);
+    } else {
+      toast({
+        title: "Connection Error",
+        description: "Could not connect to the game server. Please check your connection and try again.",
+        variant: "destructive",
+      });
+      setIsJoining(false);
+    }
   };
 
   return (

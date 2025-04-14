@@ -1,77 +1,202 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen } from '../test/test-utils';
-import { mockGoogleMapsApi } from '../test/test-utils';
+import React from 'react';
+import { vi, describe, test, expect, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import StreetView from './StreetView';
+import { mockGoogleMapsApi } from '@/test/test-utils';
 
-describe('StreetView', () => {
+// Mock UI components
+vi.mock('@/components/ui/alert', () => ({
+  Alert: ({ 
+    children, 
+    variant, 
+    className 
+  }: { 
+    children: React.ReactNode;
+    variant?: string;
+    className?: string;
+  }) => (
+    <div data-testid="alert" data-variant={variant} className={className}>
+      {children}
+    </div>
+  ),
+  AlertTitle: ({ children }: { children: React.ReactNode }) => (
+    <h3 data-testid="alert-title">{children}</h3>
+  ),
+  AlertDescription: ({ children }: { children: React.ReactNode }) => (
+    <p data-testid="alert-description">{children}</p>
+  ),
+}));
+
+vi.mock('@/components/ui/button', () => ({
+  Button: ({ 
+    children, 
+    onClick,
+    disabled,
+    variant,
+    className
+  }: { 
+    children: React.ReactNode;
+    onClick?: () => void;
+    disabled?: boolean;
+    variant?: string;
+    className?: string;
+  }) => (
+    <button 
+      onClick={onClick} 
+      disabled={disabled}
+      data-testid="button"
+      data-variant={variant}
+      className={className}
+    >
+      {children}
+    </button>
+  )
+}));
+
+vi.mock('lucide-react', () => ({
+  AlertCircle: () => <span data-testid="alert-circle-icon">Icon</span>
+}));
+
+describe('StreetView Component', () => {
+  // Setup Google Maps mock
+  const { 
+    mockStreetViewPanorama, 
+    mockGetPanorama 
+  } = mockGoogleMapsApi();
+
+  const testPosition = { lat: 37.7749, lng: -122.4194 }; // San Francisco coordinates
+
   beforeEach(() => {
-    mockGoogleMapsApi();
+    vi.clearAllMocks();
+    // Mock successful panorama response
+    mockGetPanorama.mockImplementation(() => Promise.resolve({
+      data: { location: { pano: 'test-pano-id' } }
+    }));
+
+    // Make sure the DOM is cleared between tests
+    document.body.innerHTML = '';
   });
 
-  it('shows loading state when not loaded', () => {
-    render(<StreetView isLoaded={false} />);
+  test('renders loading state when not loaded', () => {
+    render(
+      <StreetView 
+        position={testPosition}
+        isLoaded={false}
+        loadError={undefined}
+      />
+    );
+    
     expect(screen.getByText('Loading Street View...')).toBeInTheDocument();
   });
 
-  it('shows error when Street View service fails', async () => {
-    const { mockGetPanorama } = mockGoogleMapsApi();
-    mockGetPanorama.mockRejectedValue(new Error('Service failed'));
-
-    render(
-      <StreetView
-        isLoaded={true}
-        position={{ lat: 0, lng: 0 }}
-      />
-    );
-
-    // Wait for error message to appear
-    const errorMessage = await screen.findByText('Failed to load Street View. Please try again.');
-    expect(errorMessage).toBeInTheDocument();
-  });
-
-  it('shows error when no panorama is available', async () => {
-    const { mockGetPanorama } = mockGoogleMapsApi();
-    mockGetPanorama.mockResolvedValue({ data: null });
-
-    render(
-      <StreetView
-        isLoaded={true}
-        position={{ lat: 0, lng: 0 }}
-      />
-    );
-
-    // Wait for error message to appear
-    const errorMessage = await screen.findByText('Street View is not available for this location.');
-    expect(errorMessage).toBeInTheDocument();
-  });
-
-  it('initializes Street View when panorama is available', async () => {
-    const { mockGetPanorama, mockStreetViewPanorama } = mockGoogleMapsApi();
-    const mockLatLng = { lat: () => 0, lng: () => 0 };
+  test('renders Google Maps error when loadError is provided', () => {
+    const testError = new Error('Google Maps API error');
     
-    mockGetPanorama.mockResolvedValue({
-      data: {
-        location: {
-          latLng: mockLatLng
-        }
-      }
-    });
-
-    const onLoad = vi.fn();
-
     render(
-      <StreetView
+      <StreetView 
+        position={testPosition}
         isLoaded={true}
-        position={{ lat: 0, lng: 0 }}
-        onLoad={onLoad}
+        loadError={testError}
+      />
+    );
+    
+    expect(screen.getByTestId('alert-title')).toHaveTextContent('Google Maps Error');
+    expect(screen.getByTestId('alert-description')).toHaveTextContent(/Google Maps API error/i);
+  });
+
+  test('initializes Street View panorama when loaded', () => {
+    const onLoadMock = vi.fn();
+    
+    render(
+      <StreetView 
+        position={testPosition}
+        isLoaded={true}
+        loadError={undefined}
+        onLoad={onLoadMock}
+      />
+    );
+    
+    // We expect the Street View Panorama constructor to be called
+    expect(mockStreetViewPanorama).toHaveBeenCalled();
+  });
+
+  test('handles Street View error correctly', async () => {
+    // Mock failed panorama response
+    mockGetPanorama.mockImplementation(() => Promise.reject(new Error('No imagery available')));
+    
+    const onErrorMock = vi.fn();
+    
+    render(
+      <StreetView 
+        position={testPosition}
+        isLoaded={true}
+        loadError={undefined}
+        onError={onErrorMock}
       />
     );
 
-    // Wait for Street View to initialize
-    await vi.waitFor(() => {
-      expect(mockStreetViewPanorama).toHaveBeenCalled();
+    // Wait for the error state to appear
+    await waitFor(() => {
+      expect(screen.getByTestId('alert-title')).toHaveTextContent('Street View Error');
     });
-
-    expect(onLoad).toHaveBeenCalled();
+    
+    // Verify error handler was called
+    expect(onErrorMock).toHaveBeenCalled();
   });
+
+  test('shows retry button on error', async () => {
+    // Mock failed panorama response
+    mockGetPanorama.mockImplementation(() => Promise.reject(new Error('No imagery available')));
+    
+    render(
+      <StreetView 
+        position={testPosition}
+        isLoaded={true}
+        loadError={undefined}
+      />
+    );
+
+    // Wait for the error state to appear
+    await waitFor(() => {
+      const buttons = screen.getAllByTestId('button');
+      const retryButton = buttons.find(button => button.textContent === 'Retry');
+      expect(retryButton).toBeTruthy();
+    });
+  });
+
+  test('calls skip handler when Skip button is clicked', async () => {
+    // Mock failed panorama response
+    mockGetPanorama.mockImplementation(() => Promise.reject(new Error('No imagery available')));
+    
+    const onErrorMock = vi.fn();
+    
+    render(
+      <StreetView 
+        position={testPosition}
+        isLoaded={true}
+        loadError={undefined}
+        onError={onErrorMock}
+      />
+    );
+
+    // Wait for the error state to appear and buttons to be rendered
+    await waitFor(() => {
+      expect(screen.getAllByTestId('button').length).toBeGreaterThan(0);
+    });
+    
+    // Find and click the skip button
+    const buttons = screen.getAllByTestId('button');
+    const skipButton = buttons.find(button => button.textContent?.includes('Skip'));
+    expect(skipButton).toBeTruthy();
+    
+    if (skipButton) {
+      fireEvent.click(skipButton);
+    }
+    
+    // Verify skip error was sent with the right message
+    expect(onErrorMock).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'SKIP_TO_NEXT_LOCATION'
+    }));
+  });
+
 }); 

@@ -19,6 +19,27 @@ export const mockGoogleMapsApi = () => {
       LatLng: mockLatLng,
       StreetViewSource: {
         OUTDOOR: 'OUTDOOR'
+      },
+      event: {
+        addDomListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn()
+      },
+      Size: vi.fn(),
+      Point: vi.fn(),
+      Marker: vi.fn(() => ({
+        setMap: vi.fn(),
+        setPosition: vi.fn()
+      })),
+      InfoWindow: vi.fn(() => ({
+        open: vi.fn(),
+        close: vi.fn(),
+        setContent: vi.fn()
+      })),
+      geometry: {
+        spherical: {
+          computeDistanceBetween: vi.fn(() => 1000)
+        }
       }
     }
   } as any;
