@@ -46,8 +46,9 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: corsOptions,
   transports: ['websocket', 'polling'],
-  pingTimeout: 60000,
-  pingInterval: 25000,
+  pingTimeout: 60000, // Time to wait for a ping response before considering the connection dead
+  pingInterval: 25000, // How often to send a ping to check connection health
+  connectTimeout: 10000, // Time to wait for a connection to be established
   path: '/socket.io',
   // Handle serverless environments
   adapter: process.env.VERCEL ? {
