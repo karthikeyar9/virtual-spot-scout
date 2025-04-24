@@ -40,14 +40,16 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     try {
       // Create socket with explicit configuration
       const newSocket = io(SOCKET_SERVER_URL, {
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000,
-        timeout: 10000,
+        reconnectionAttempts: 10,    // Increased from 5 to 10 attempts
+        timeout: 20000,              // Increased to match server's connectTimeout
         transports: ['websocket', 'polling'],
         forceNew: true,
         withCredentials: false,
         autoConnect: true,
-        path: '/socket.io' // Explicitly set the socket.io path
+        path: '/socket.io',
+        reconnectionDelayMax: 5000,
+        randomizationFactor: 0.5,
+        reconnectionDelay: 2000      // Fixed 2 second delay between reconnection attempts
       });
       
       console.log('🔌 Socket instance created with config:', {
@@ -63,7 +65,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         console.log('✅ Socket connected successfully! ID:', newSocket.id);
         console.log('🔍 Connection details:', {
           transport: newSocket.io.engine?.transport?.name || 'unknown',
-          connected: newSocket.connected
+          connected: newSocket.connected,
+          reconnecting: newSocket.io._reconnecting
         });
         
         setIsConnected(true);
@@ -76,20 +79,25 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
       });
       
-      // Listen for connection errors
+      // Listen for connection errors with more detailed logging
       newSocket.on('connect_error', (err) => {
         console.error('❌ Socket connection error:', {
           message: err.message,
-          name: err.name
+          name: err.name,
+          transport: newSocket.io.engine?.transport?.name || 'unknown'
         });
+        
         setIsConnected(false);
         setError(err);
         
-        toast({
-          title: "Connection Error",
-          description: `Could not connect to game server: ${err.message}`,
-          variant: "destructive",
-        });
+        // Only show toast for initial connection errors, not reconnection attempts
+        if (!newSocket.io._reconnecting) {
+          toast({
+            title: "Connection Error",
+            description: `Could not connect to game server: ${err.message}`,
+            variant: "destructive",
+          });
+        }
       });
       
       // Listen for disconnection

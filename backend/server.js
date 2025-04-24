@@ -46,9 +46,10 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: corsOptions,
   transports: ['websocket', 'polling'],
-  pingTimeout: 60000, // Time to wait for a ping response before considering the connection dead
-  pingInterval: 25000, // How often to send a ping to check connection health
-  connectTimeout: 10000, // Time to wait for a connection to be established
+  pingTimeout: 20000,        // Reduced to 20s for faster detection of stale connections
+  pingInterval: 5000,        // Reduced to 5s for more frequent health checks
+  connectTimeout: 20000,     // Increased to 20s to give more time for initial connection
+  maxHttpBufferSize: 1e6,    // 1 MB - Reasonable buffer size
   path: '/socket.io',
   // Handle serverless environments
   adapter: process.env.VERCEL ? {
@@ -67,8 +68,8 @@ const io = new Server(server, {
 console.log('🔌 Socket.IO configuration:', {
   cors: corsOptions,
   transports: ['websocket', 'polling'],
-  pingTimeout: 60000,
-  pingInterval: 25000,
+  pingTimeout: 20000,
+  pingInterval: 5000,
   path: '/socket.io'
 });
 
@@ -382,6 +383,16 @@ io.on('connection', (socket) => {
   });
 });
 
+// Add error handling middleware
+io.engine.on("connection_error", (err) => {
+  console.log('🔴 Socket.IO connection error:', {
+    req: err.req,      // the request object
+    code: err.code,    // the error code, for example 1
+    message: err.message, // the error message, for example "Session ID unknown"
+    context: err.context // some additional error context
+  });
+});
+
 // For Vercel serverless environment, we need to check if the code is running in a serverless function
 if (process.env.VERCEL) {
   // In Vercel, export the app instead of starting the server
@@ -390,13 +401,13 @@ if (process.env.VERCEL) {
   // Start the server normally in development or on Render
   const serverPort = process.env.PORT || 3001;
   server.listen(serverPort, () => {
-    console.log(`
+  console.log(`
 🎮 Virtual Spot Scout Server
 -----------------------------
 ✅ Server is running on port ${serverPort}
 🌐 Visit http://localhost:${serverPort} to verify server is running
 📡 WebSocket server is ready
 🔒 CORS is configured for allowed origins
-    `);
-  });
+  `);
+}); 
 } 
