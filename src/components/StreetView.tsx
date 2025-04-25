@@ -30,6 +30,9 @@ const StreetView: React.FC<StreetViewProps> = ({
 
     const initStreetView = async () => {
       try {
+        // Add delay between requests to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
         // Clean up previous panorama if it exists
         if (panoramaRef.current) {
           panoramaRef.current = null;
@@ -47,10 +50,18 @@ const StreetView: React.FC<StreetViewProps> = ({
           panControl: true,
           motionTracking: false,
           motionTrackingControl: false,
-          linksControl: false,
-          clickToGo: false,
+          linksControl: true,
+          clickToGo: true,
           disableDefaultUI: false,
-          visible: true
+          visible: true,
+          controlSize: 30,
+          zoomControlOptions: {
+            position: google.maps.ControlPosition.RIGHT_CENTER
+          },
+          panControlOptions: {
+            position: google.maps.ControlPosition.RIGHT_CENTER
+          },
+          scrollwheel: true
         });
 
         // Store reference to the panorama
@@ -61,20 +72,47 @@ const StreetView: React.FC<StreetViewProps> = ({
           onLoad();
         }
 
-        // Setup error event listener
+        // Setup error event listener with retry logic
         const streetViewService = new google.maps.StreetViewService();
-        streetViewService.getPanorama({
-          location: position,
-          radius: 50 // Search within 50 meters
-        }).then(() => {
-          console.log('Street View panorama available for this location');
-        }).catch((e) => {
-          console.error('Street View error:', e);
-          setError('No Street View imagery available for this location');
-          if (onError) {
-            onError(new Error(e.message || 'Street View not available'));
+        let retryAttempt = 0;
+        const maxRetries = 3;
+
+        const attemptGetPanorama = async () => {
+          try {
+            await streetViewService.getPanorama({
+              location: position,
+              radius: 50, // Search within 50 meters
+              source: google.maps.StreetViewSource.OUTDOOR
+            });
+            console.log('Street View panorama available for this location');
+          } catch (e) {
+            console.error('Street View error:', e);
+            const errorMessage = e.message || 'Street View not available';
+
+            // If it's a rate limit or quota error, retry after delay
+            if (errorMessage.includes('OVER_QUERY_LIMIT') || errorMessage.includes('RESOURCE_EXHAUSTED')) {
+              if (retryAttempt < maxRetries) {
+                retryAttempt++;
+                console.log(`Retrying (${retryAttempt}/${maxRetries}) after delay...`);
+                await new Promise(resolve => setTimeout(resolve, 2000 * retryAttempt));
+                return attemptGetPanorama();
+              }
+            }
+            
+            setError('No Street View imagery available for this location');
+            
+            // If it's a ZERO_RESULTS error, automatically trigger skip
+            if (errorMessage.includes('ZERO_RESULTS')) {
+              if (onError) {
+                onError(new Error("SKIP_TO_NEXT_LOCATION"));
+              }
+            } else if (onError) {
+              onError(new Error(errorMessage));
+            }
           }
-        });
+        };
+
+        await attemptGetPanorama();
 
       } catch (e) {
         console.error('Street View initialization error:', e);

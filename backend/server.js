@@ -107,120 +107,79 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Get room state
+  // Handle room state request
   socket.on('getRoomState', ({ roomId }) => {
-    console.log('📋 Room state requested:', {
-      socketId: socket.id,
-      roomId,
-      existingRoom: !!rooms[roomId]
-    });
+    console.log(`📝 Room state requested for room ${roomId}`);
     
-    // If room exists, send complete state
-    // If not, send empty state
-    const roomState = rooms[roomId] || { players: [], hasStarted: false };
-    
-    console.log('📤 Sending room state:', {
-      roomId,
-      hasStarted: roomState.hasStarted,
-      playerCount: roomState.players.length
-    });
-    
-    socket.emit('roomState', roomState);
-  });
-
-  // Join room
-  socket.on('joinRoom', ({ roomId, playerName, playerId, isHost }) => {
-    console.log('🚪 Join room request:', {
-      socketId: socket.id,
-      roomId,
-      playerName,
-      playerId,
-      isHost
-    });
-    
-    // Initialize room if it doesn't exist
-    if (!rooms[roomId]) {
-      rooms[roomId] = { 
-        players: [],
+    if (rooms[roomId]) {
+      // Send the current room state
+      socket.emit('roomState', {
+        hasStarted: rooms[roomId].hasStarted,
+        players: rooms[roomId].players,
+        currentRound: rooms[roomId].currentRound,
+        totalRounds: rooms[roomId].totalRounds
+      });
+    } else {
+      // If room doesn't exist, create it
+      rooms[roomId] = {
         hasStarted: false,
+        players: [],
         currentRound: 0,
         totalRounds: 5,
         guesses: {}
       };
-      console.log('🆕 Created new room:', roomId);
+      socket.emit('roomState', rooms[roomId]);
+    }
+  });
+
+  // Handle player joining room
+  socket.on('joinRoom', ({ roomId, playerName, playerId, isHost }) => {
+    console.log(`👋 Player ${playerName} (${playerId}) joining room ${roomId}`);
+    
+    // Create room if it doesn't exist
+    if (!rooms[roomId]) {
+      rooms[roomId] = {
+        hasStarted: false,
+        players: [],
+        currentRound: 0,
+        totalRounds: 5,
+        guesses: {}
+      };
     }
 
-    // Store socket and player info
-    socket.data = socket.data || {};
-    socket.data.roomId = roomId;
-    socket.data.playerName = playerName;
-    socket.data.playerId = playerId;
-    
-    // Add player to room if not already there
-    const playerExists = rooms[roomId].players.some(p => p.id === playerId);
-    if (!playerExists) {
-      rooms[roomId].players.push({ 
-        id: playerId, 
-        name: playerName, 
-        isHost: isHost || false,
-        isReady: isHost || false,
-        score: 0 // Initialize score for new players
-      });
-      console.log('👤 Added new player to room:', {
-        roomId,
-        playerName,
-        playerId,
-        totalPlayers: rooms[roomId].players.length
-      });
-    } else {
-      // Player exists - update their socket association and mark them as reconnected
-      console.log('🔄 Player reconnected to room:', {
-        roomId,
-        playerName,
-        playerId
-      });
-      
-      // Update player properties if needed (keeping their score intact)
-      const playerIndex = rooms[roomId].players.findIndex(p => p.id === playerId);
-      if (playerIndex !== -1) {
-        // Keep the player's existing score and host status
-        const existingScore = rooms[roomId].players[playerIndex].score || 0;
-        const existingIsHost = rooms[roomId].players[playerIndex].isHost;
-        
-        rooms[roomId].players[playerIndex] = {
-          ...rooms[roomId].players[playerIndex],
-          name: playerName, // Update name in case it changed
-          isHost: isHost || existingIsHost
-        };
-        
-        console.log('✏️ Updated player name:', {
-          roomId,
-          playerName,
-          playerId
-        });
-      }
-    }
-    
     // Join the socket room
     socket.join(roomId);
-    console.log('✅ Player joined room successfully:', {
-      roomId,
-      playerName,
-      playerId,
-      currentPlayers: rooms[roomId].players.length
+    
+    // Check if player already exists (reconnection)
+    const existingPlayerIndex = rooms[roomId].players.findIndex(p => p.id === playerId);
+    
+    if (existingPlayerIndex === -1) {
+      // Add new player
+      rooms[roomId].players.push({
+        id: playerId,
+        name: playerName,
+        score: 0,
+        isHost,
+        isReady: isHost
+      });
+    } else {
+      // Update existing player's connection
+      rooms[roomId].players[existingPlayerIndex].name = playerName;
+      rooms[roomId].players[existingPlayerIndex].isHost = isHost;
+    }
+    
+    // Broadcast updated player list
+    io.to(roomId).emit('playersUpdated', {
+      players: rooms[roomId].players
     });
     
-    // Send updated player list to everyone in the room
-    io.to(roomId).emit('playersUpdated', { players: rooms[roomId].players });
-    
-    // If game has already started, notify the reconnected player
-    if (rooms[roomId].hasStarted) {
-      console.log('🎮 Notifying reconnected player about active game:', {
-        roomId,
-        playerId
-      });
-      socket.emit('gameStarted');
-    }
+    // Send current room state to the joining player
+    socket.emit('roomState', {
+      hasStarted: rooms[roomId].hasStarted,
+      players: rooms[roomId].players,
+      currentRound: rooms[roomId].currentRound,
+      totalRounds: rooms[roomId].totalRounds
+    });
   });
 
   // Handle player ready status

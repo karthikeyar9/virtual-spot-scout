@@ -115,13 +115,19 @@ const GameRoom = () => {
         if (roomState.hasStarted) {
           startGame();
         }
+        if (roomState.players) {
+          setPlayers(roomState.players);
+        }
       });
+      
+      // Request room state immediately after connection
+      socket.emit('getRoomState', { roomId });
       
       return () => {
         socket.off('roomState');
       };
     }
-  }, [socket, isConnected, roomId, startGame]);
+  }, [socket, isConnected, roomId, startGame, setPlayers]);
 
   // Handle name submission
   const handleNameSubmit = useCallback(() => {
@@ -156,9 +162,9 @@ const GameRoom = () => {
     
     // If we have a socket connection and either:
     // 1. No player ID yet, or
-    // 2. We have saved player info from local storage
+    // 2. We have saved player info
     // Then we should join the room
-    if (socket && isConnected && roomId && (!playerId || gameState.savedPlayerInfo)) {
+    if (socket && isConnected && roomId) {
       console.log('🔄 Checking if we should join or rejoin the room');
       console.log('Current player name:', playerName);
       
@@ -185,10 +191,7 @@ const GameRoom = () => {
           playerId: savedId,
           isHost: savedIsHost
         });
-        
-        // Request room state to sync with server
-        socket.emit('getRoomState', { roomId });
-      } 
+      }
       // If we don't have saved info but also don't have a playerId yet, join as a new player
       else if (!playerId && playerName) {
         // Generate a new player ID
@@ -213,9 +216,6 @@ const GameRoom = () => {
           playerId: newPlayerId,
           isHost 
         });
-        
-        // Request room state
-        socket.emit('getRoomState', { roomId });
       }
     }
   }, [
@@ -342,35 +342,44 @@ const GameRoom = () => {
     }
   }, [hasStarted, isActive, hasGuessed]);
 
+  // Handle guess submission
   const handleGuessSubmit = useCallback(() => {
-    if (playerId && tempGuessLocation) {
-      console.log('📝 Submitting guess:', {
+    if (!tempGuessLocation || hasGuessed || !currentRound || !playerId) return;
+    
+    setHasGuessed(true);
+    setIsTimerRunning(false); // Stop the timer
+    setPendingGuessLocation(tempGuessLocation);
+    
+    // Submit guess to game state
+    submitGuess(playerId, tempGuessLocation);
+    
+    // Emit guess to socket
+    if (socket && isConnected && roomId) {
+      socket.emit('submitGuess', {
+        roomId,
         playerId,
-        location: tempGuessLocation
+        guessLocation: tempGuessLocation
       });
-      submitGuess(playerId, tempGuessLocation);
-      setHasGuessed(true);
-      
-      // Sync with server that player has guessed
-      if (socket && isConnected && roomId) {
-        socket.emit('playerGuessed', { 
-          roomId, 
-          playerId, 
-          location: tempGuessLocation 
-        });
-      }
-      
-      // Force show results after a short delay if the round doesn't complete automatically
-      setTimeout(() => {
-        if (!showResults) {
-          console.log('⏱️ Forcing results display after timeout');
-          setShowResults(true);
-        }
-      }, 1000);
-    } else {
-      console.warn("Attempted to submit guess without player ID or location");
     }
-  }, [playerId, tempGuessLocation, submitGuess, socket, isConnected, roomId, showResults]);
+  }, [
+    tempGuessLocation,
+    hasGuessed,
+    currentRound,
+    playerId,
+    submitGuess,
+    socket,
+    isConnected,
+    roomId
+  ]);
+
+  // Update the useEffect to handle timer state
+  useEffect(() => {
+    if (hasStarted && isActive && !hasGuessed && !showResults) {
+      setIsTimerRunning(true);
+    } else {
+      setIsTimerRunning(false);
+    }
+  }, [hasStarted, isActive, hasGuessed, showResults]);
 
   const handleNextRound = useCallback(() => {
     setShowResults(false);
