@@ -107,7 +107,7 @@ const GameLobby = ({
               {currentPlayer?.isReady ? "Not Ready" : "Ready"}
             </Button>
             
-            {currentPlayer?.isReady && (
+            {isHost && currentPlayer?.isReady && (
               <Button
                 disabled={!canStartGame}
                 onClick={onStartGame}

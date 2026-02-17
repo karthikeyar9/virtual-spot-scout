@@ -90,6 +90,37 @@ const PORT = process.env.PORT || 3001;
 // Store rooms and their players
 const rooms = {};
 
+// Helper: Haversine distance calculation (returns km)
+function calculateDistance(point1, point2) {
+  const R = 6371; // Earth's radius in km
+  const dLat = toRad(point2.lat - point1.lat);
+  const dLon = toRad(point2.lng - point1.lng);
+  const lat1 = toRad(point1.lat);
+  const lat2 = toRad(point2.lat);
+
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function toRad(degrees) {
+  return degrees * Math.PI / 180;
+}
+
+function calculateScore(distance) {
+  if (distance < 1) return 5000;
+  if (distance < 5) return 4000;
+  if (distance < 10) return 3000;
+  if (distance < 50) return 2000;
+  if (distance < 100) return 1000;
+  if (distance < 500) return 500;
+  if (distance < 1000) return 250;
+  if (distance < 5000) return 100;
+  if (distance < 10000) return 50;
+  return 0;
+}
+
 // Socket.IO connection handlers
 io.on('connection', (socket) => {
   console.log('✨ New connection established:', {
@@ -149,7 +180,10 @@ io.on('connection', (socket) => {
 
     // Join the socket room
     socket.join(roomId);
-    
+
+    // Store player data on socket for disconnect handling
+    socket.data = { roomId, playerId, playerName };
+
     // Check if player already exists (reconnection)
     const existingPlayerIndex = rooms[roomId].players.findIndex(p => p.id === playerId);
     
@@ -201,7 +235,9 @@ io.on('connection', (socket) => {
   socket.on('startGame', ({ roomId, rounds = 5 }) => {
     if (rooms[roomId]) {
       // Check if all players are ready
-      const allPlayersReady = rooms[roomId].players.every(player => player.isReady);
+      const allPlayersReady = rooms[roomId].players.every(player => 
+        player.isReady || player.isHost // Host is always considered ready
+      );
       
       if (!allPlayersReady) {
         console.log(`❌ Attempted to start game in room ${roomId} but not all players are ready`);
@@ -211,13 +247,27 @@ io.on('connection', (socket) => {
         return;
       }
       
+      // Reset game state
       rooms[roomId].hasStarted = true;
       rooms[roomId].currentRound = 0;
       rooms[roomId].totalRounds = rounds;
       rooms[roomId].guesses = {};
       
+      // Reset player scores
+      rooms[roomId].players = rooms[roomId].players.map(player => ({
+        ...player,
+        score: 0
+      }));
+      
       console.log(`🎮 Game in room ${roomId} is starting with ${rounds} rounds`);
+      
+      // Broadcast game start to all players in the room
       io.to(roomId).emit('gameStarted');
+      
+      // Also send updated player list with reset scores
+      io.to(roomId).emit('playersUpdated', {
+        players: rooms[roomId].players
+      });
     }
   });
 
@@ -242,34 +292,72 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Track player guesses
-  socket.on('playerGuessed', ({ roomId, playerId, location }) => {
-    console.log('🎯 Player submitted guess:', {
-      roomId,
-      playerId,
-      location
-    });
-    
+  // Handle guess submission
+  socket.on('submitGuess', ({ roomId, playerId, guess, target }) => {
     if (rooms[roomId]) {
-      // Track that this player has guessed in the current round
+      console.log(`📍 Player ${playerId} submitted guess in room ${roomId}`, { guess, target });
+
+      // Store the guess with distance and score
       if (!rooms[roomId].guesses) {
         rooms[roomId].guesses = {};
       }
-      
-      rooms[roomId].guesses[playerId] = location;
-      
+
+      // Store the target location for this round (from the first guess that includes it)
+      if (target && !rooms[roomId].currentTarget) {
+        rooms[roomId].currentTarget = target;
+      }
+
+      // Use client-sent distance/score if available, otherwise calculate server-side
+      let distance = guess.distance;
+      let score = guess.score;
+      const roundTarget = target || rooms[roomId].currentTarget;
+
+      if ((distance === undefined || score === undefined) && roundTarget) {
+        distance = calculateDistance(
+          { lat: guess.lat, lng: guess.lng },
+          roundTarget
+        );
+        score = calculateScore(distance);
+      }
+
+      // Store the complete guess data
+      rooms[roomId].guesses[playerId] = {
+        lat: guess.lat,
+        lng: guess.lng,
+        distance: distance || 0,
+        score: score || 0
+      };
+
+      // Update player score on the server
+      const playerIndex = rooms[roomId].players.findIndex(p => p.id === playerId);
+      if (playerIndex !== -1) {
+        rooms[roomId].players[playerIndex].score = (rooms[roomId].players[playerIndex].score || 0) + (score || 0);
+        rooms[roomId].players[playerIndex].roundScore = score || 0;
+        rooms[roomId].players[playerIndex].distanceToTarget = distance || 0;
+      }
+
       // Check if all players have guessed
-      const totalPlayers = rooms[roomId].players.length;
-      const totalGuesses = Object.keys(rooms[roomId].guesses).length;
-      
-      console.log(`👥 Guesses received: ${totalGuesses}/${totalPlayers}`);
-      
-      // If all players have guessed, notify everyone
-      if (totalGuesses >= totalPlayers) {
-        console.log('✅ All players have guessed! Notifying room to show results');
-        io.to(roomId).emit('roundComplete', { 
+      const allPlayersGuessed = rooms[roomId].players.every(player =>
+        rooms[roomId].guesses[player.id]
+      );
+
+      if (allPlayersGuessed) {
+        console.log('🎯 All players have guessed, broadcasting results...');
+
+        // Broadcast round completion with server-authoritative scores
+        io.to(roomId).emit('roundComplete', {
           guesses: rooms[roomId].guesses,
-          roundNumber: rooms[roomId].currentRound || 0
+          players: rooms[roomId].players
+        });
+
+        // Clear guesses and currentTarget for next round
+        rooms[roomId].guesses = {};
+        rooms[roomId].currentTarget = null;
+      } else {
+        // Broadcast the current guesses to keep all players in sync
+        io.to(roomId).emit('guessSubmitted', {
+          players: rooms[roomId].players,
+          guesses: rooms[roomId].guesses
         });
       }
     }

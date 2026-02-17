@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { 
   Card, CardContent, CardFooter, CardHeader, CardTitle 
@@ -12,7 +12,7 @@ import { ArrowLeft, Globe, Send, Copy, Share2, AlertCircle, User } from "lucide-
 import { useGameState } from "@/hooks/useGameState";
 import { cn } from "@/lib/utils";
 import StreetView from "./StreetView";
-import GuessMap from "./GuessMap";
+import { GuessMap } from "./GuessMap";
 import Timer from "./Timer";
 import PlayerList from "./PlayerList";
 import ResultsDisplay from "./ResultsDisplay";
@@ -26,11 +26,21 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Navbar from './Navbar';
 
+// Define libraries array outside component to prevent recreation
+const GOOGLE_MAPS_LIBRARIES: ("places" | "geometry")[] = ["places", "geometry"];
+
 const GameRoom = () => {
   const { roomId } = useParams<{ roomId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { toast } = useToast();
+  
+  // Add missing state variables
+  const [timeRemaining, setTimeRemaining] = useState<number>(60);
+  const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>({
+    lat: 0,
+    lng: 0
+  });
   
   // Get player name from URL params or use default "Player"
   const urlPlayerName = searchParams.get("name");
@@ -82,12 +92,15 @@ const GameRoom = () => {
     ? players.find(p => p.id === playerId)
     : null;
 
-  // Load Google Maps API here
-  const { isLoaded: isMapApiLoaded, loadError: mapApiLoadError } = useJsApiLoader({
+  // Memoize the loader configuration
+  const mapsApiConfig = useMemo(() => ({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
-    libraries: ['places', 'geometry'], // Include ALL needed libraries
+    libraries: GOOGLE_MAPS_LIBRARIES,
     version: "weekly"
-  });
+  }), []); // Empty dependency array since none of these values change
+
+  // Load Google Maps API here
+  const { isLoaded: isMapApiLoaded, loadError: mapApiLoadError } = useJsApiLoader(mapsApiConfig);
 
   // Socket connection
   const { socket, isConnected, error: socketError } = useSocket();
@@ -243,7 +256,22 @@ const GameRoom = () => {
       // Listen for game start
       socket.on('gameStarted', () => {
         console.log('Game started via socket');
+        // Reset any existing game state
+        setHasGuessed(false);
+        setShowResults(false);
+        setShowFinalResults(false);
+        setTempGuessLocation(null);
+        
+        // Start the game for this player
         startGame();
+        
+        // Start the timer
+        setIsTimerRunning(true);
+        
+        toast({
+          title: "Game Started!",
+          description: "The game has begun. Good luck!",
+        });
       });
 
       // Listen for room state
@@ -267,11 +295,69 @@ const GameRoom = () => {
         });
       });
 
+      // Listen for score updates
+      socket.on('scoresUpdated', ({ players: updatedPlayers, guesses }) => {
+        console.log('📊 Scores updated:', { players: updatedPlayers, guesses });
+        setPlayers(updatedPlayers);
+      });
+
+      // Listen for guess submissions
+      socket.on('guessSubmitted', ({ players: updatedPlayers, guesses }) => {
+        console.log('🎯 New guess submitted:', { players: updatedPlayers, guesses });
+        
+        // Update players with their guesses
+        const playersWithGuesses = updatedPlayers.map(player => {
+          const playerGuess = guesses[player.id];
+          if (playerGuess) {
+            return {
+              ...player,
+              guessLocation: {
+                lat: playerGuess.lat,
+                lng: playerGuess.lng
+              },
+              distanceToTarget: playerGuess.distance,
+              roundScore: playerGuess.score
+            };
+          }
+          return player;
+        });
+        
+        setPlayers(playersWithGuesses);
+      });
+
       // Listen for round completion from server
-      socket.on('roundComplete', ({ guesses }) => {
-        console.log('📊 Round completed! Showing results');
-        console.log('All guesses:', guesses);
+      socket.on('roundComplete', ({ guesses, players: updatedPlayers }) => {
+        console.log('📊 Round completed! Showing results:', { guesses, players: updatedPlayers });
+
+        if (!guesses) {
+          console.error('No guesses data received from server');
+          return;
+        }
+
+        // Use server-authoritative scores (server already calculated totals)
+        const playersWithGuesses = updatedPlayers.map(player => {
+          const playerGuess = guesses[player.id];
+          if (!playerGuess) {
+            console.log(`No guess found for player ${player.id}`);
+            return player;
+          }
+          return {
+            ...player,
+            guessLocation: {
+              lat: playerGuess.lat,
+              lng: playerGuess.lng
+            },
+            roundScore: playerGuess.score,
+            distanceToTarget: playerGuess.distance,
+            // Use server score directly - don't add again (server already added it)
+            score: player.score
+          };
+        });
+
+        console.log('Updated players with guesses and scores:', playersWithGuesses);
+        setPlayers(playersWithGuesses);
         setShowResults(true);
+        setIsTimerRunning(false);
       });
 
       // Listen for round advancement
@@ -279,15 +365,22 @@ const GameRoom = () => {
         console.log('🔄 Advancing to next round');
         setHasGuessed(false);
         setTempGuessLocation(null);
+        setShowResults(false);
+        setIsTimerRunning(true);
       });
       
       // Listen for game completion
       socket.on('gameComplete', ({ players: finalPlayers }) => {
         console.log('🏁 Game completed! Final results:', finalPlayers);
-        // Use the players from the server for final results
         setPlayers(finalPlayers);
-        // Show final results dialog
         setShowFinalResults(true);
+      });
+
+      // Listen for next round
+      socket.on('nextRound', () => {
+        console.log('🔄 Server confirmed next round');
+        setTimeRemaining(timeLimit);
+        setIsTimerRunning(true);
       });
 
       // Clean up socket listeners on unmount
@@ -296,12 +389,15 @@ const GameRoom = () => {
         socket.off('gameStarted');
         socket.off('roomState');
         socket.off('errorMessage');
+        socket.off('scoresUpdated');
+        socket.off('guessSubmitted');
         socket.off('roundComplete');
         socket.off('roundAdvanced');
         socket.off('gameComplete');
+        socket.off('nextRound');
       };
     }
-  }, [socket, isConnected, roomId, setPlayers, startGame, toast]);
+  }, [socket, isConnected, roomId, setPlayers, startGame, toast, currentRound, timeLimit]);
 
   // Handle ready status
   const handleToggleReady = useCallback(() => {
@@ -342,74 +438,121 @@ const GameRoom = () => {
     }
   }, [hasStarted, isActive, hasGuessed]);
 
+  // Calculate score based on distance (tiered system matching backend)
+  const calculateScore = (distanceInKm: number): number => {
+    if (distanceInKm < 1) return 5000;
+    if (distanceInKm < 5) return 4000;
+    if (distanceInKm < 10) return 3000;
+    if (distanceInKm < 50) return 2000;
+    if (distanceInKm < 100) return 1000;
+    if (distanceInKm < 500) return 500;
+    if (distanceInKm < 1000) return 250;
+    if (distanceInKm < 5000) return 100;
+    if (distanceInKm < 10000) return 50;
+    return 0;
+  };
+
   // Handle guess submission
   const handleGuessSubmit = useCallback(() => {
-    if (!tempGuessLocation || hasGuessed || !currentRound || !playerId) return;
-    
-    setHasGuessed(true);
-    setIsTimerRunning(false); // Stop the timer
-    setPendingGuessLocation(tempGuessLocation);
-    
-    // Submit guess to game state
-    submitGuess(playerId, tempGuessLocation);
-    
-    // Emit guess to socket
-    if (socket && isConnected && roomId) {
-      socket.emit('submitGuess', {
-        roomId,
-        playerId,
-        guessLocation: tempGuessLocation
+    if (!tempGuessLocation || !socket || !roomId || !playerId || !currentRound?.target) {
+      console.error('Missing required data for guess submission:', {
+        hasLocation: !!tempGuessLocation,
+        hasSocket: !!socket,
+        hasRoomId: !!roomId,
+        hasPlayerId: !!playerId,
+        hasTarget: !!currentRound?.target
       });
+      return;
     }
-  }, [
-    tempGuessLocation,
-    hasGuessed,
-    currentRound,
-    playerId,
-    submitGuess,
-    socket,
-    isConnected,
-    roomId
-  ]);
 
-  // Update the useEffect to handle timer state
+    // Create the guess object
+    const guess = {
+      lat: tempGuessLocation.lat,
+      lng: tempGuessLocation.lng,
+      timestamp: Date.now()
+    };
+
+    // Calculate distance and score locally
+    const distance = google.maps.geometry.spherical.computeDistanceBetween(
+      new google.maps.LatLng(guess.lat, guess.lng),
+      new google.maps.LatLng(currentRound.target.lat, currentRound.target.lng)
+    ) / 1000; // Convert to kilometers
+
+    const score = calculateScore(distance);
+    
+    console.log('🎯 Submitting guess with calculated data:', { guess, distance, score });
+
+    // Update local state
+    setHasGuessed(true);
+    setIsTimerRunning(false);
+    setPendingGuessLocation(tempGuessLocation);
+
+    // Create the complete guess data
+    const guessData = {
+      ...guess,
+      distance,
+      score
+    };
+
+    // Update local player state immediately for responsiveness
+    // Server roundComplete will overwrite with authoritative scores
+    const updatedPlayers = players.map(player => {
+      if (player.id === playerId) {
+        return {
+          ...player,
+          guessLocation: { lat: guessData.lat, lng: guessData.lng },
+          distanceToTarget: distance,
+          roundScore: score
+        };
+      }
+      return player;
+    });
+    setPlayers(updatedPlayers);
+
+    // Emit to server with complete guess data
+    socket.emit('submitGuess', {
+      roomId,
+      playerId,
+      guess: guessData,
+      target: currentRound.target
+    });
+  }, [tempGuessLocation, socket, roomId, playerId, currentRound?.target, players]);
+
+  // Timer management
   useEffect(() => {
     if (hasStarted && isActive && !hasGuessed && !showResults) {
+      setTimeRemaining(timeLimit);
       setIsTimerRunning(true);
     } else {
       setIsTimerRunning(false);
     }
-  }, [hasStarted, isActive, hasGuessed, showResults]);
+  }, [hasStarted, isActive, hasGuessed, showResults, timeLimit]);
+
+  // Handle time update
+  const handleTimeUpdate = useCallback((time: number) => {
+    setTimeRemaining(time);
+  }, []);
 
   const handleNextRound = useCallback(() => {
+    if (!socket || !roomId) {
+      console.error('Missing required data for advancing round');
+      return;
+    }
+
+    // Close the results modal and reset states
     setShowResults(false);
     setHasGuessed(false);
     setTempGuessLocation(null);
     
-    // Sync player scores with server before advancing to the next round
-    if (socket && isConnected && roomId) {
-      const playerScores = {};
-      players.forEach(player => {
-        playerScores[player.id] = player.score || 0;
-      });
-      
-      // Send player scores to server to sync
-      socket.emit('updateScores', { 
-        roomId,
-        playerScores
-      });
-    }
-    
+    // Advance to next round
     nextRound();
-
-    // Notify server about round advancement
-    if (socket && isConnected && roomId) {
-      socket.emit('nextRound', { 
-        roomId,
-        rounds: gameRounds.length 
-      });
-    }
-  }, [nextRound, socket, isConnected, roomId, players, gameRounds.length]);
+    
+    // Notify server
+    socket.emit('nextRound', { 
+      roomId,
+      rounds: gameRounds.length 
+    });
+  }, [socket, roomId, nextRound, gameRounds?.length]);
 
   const handlePlayAgain = useCallback(() => {
     setShowFinalResults(false);
@@ -422,8 +565,6 @@ const GameRoom = () => {
       setShowFinalResults(true);
     }
   }, [isActive, hasStarted]);
-
-  // In the GameRoom component, add the handleStreetViewError function
 
   const handleStreetViewError = useCallback((error: Error) => {
     console.error('StreetView error in GameRoom:', error.message);
@@ -489,6 +630,67 @@ const GameRoom = () => {
     });
   }, [resetGame, socket, isConnected, roomId, rounds, toast]);
 
+  // Handle timer expiration - submit guess or mark as no-guess with 0 points
+  const handleTimerComplete = useCallback(() => {
+    if (hasGuessed || showResults) return;
+
+    console.log('⏰ Timer expired');
+
+    if (tempGuessLocation) {
+      // Player placed a pin but didn't submit - auto-submit it
+      handleGuessSubmit();
+    } else if (socket && roomId && playerId && currentRound?.target) {
+      // No guess placed - submit a dummy guess with 0 score
+      console.log('⏰ No guess placed, submitting with 0 points');
+      setHasGuessed(true);
+      setIsTimerRunning(false);
+
+      const noGuessData = {
+        lat: 0,
+        lng: 0,
+        distance: 99999,
+        score: 0
+      };
+
+      socket.emit('submitGuess', {
+        roomId,
+        playerId,
+        guess: noGuessData,
+        target: currentRound.target
+      });
+
+      // Update local state
+      const updatedPlayers = players.map(player => {
+        if (player.id === playerId) {
+          return {
+            ...player,
+            roundScore: 0,
+            distanceToTarget: 99999
+          };
+        }
+        return player;
+      });
+      setPlayers(updatedPlayers);
+    }
+  }, [hasGuessed, showResults, tempGuessLocation, handleGuessSubmit, socket, roomId, playerId, currentRound?.target, players, setPlayers]);
+
+  // Memoize the StreetView component props
+  const streetViewProps = useMemo(() => ({
+    position: currentRound?.target,
+    onLoad: () => console.log('Street view loaded'),
+    isLoaded: isMapApiLoaded,
+    loadError: mapApiLoadError,
+    onError: handleStreetViewError,
+    className: "h-full w-full"
+  }), [currentRound?.target, isMapApiLoaded, mapApiLoadError, handleStreetViewError]);
+
+  // Add a new effect to handle time remaining updates
+  useEffect(() => {
+    if (hasStarted && currentRound && !hasGuessed && !showResults) {
+      setTimeRemaining(timeLimit);
+    }
+  }, [hasStarted, currentRound, hasGuessed, showResults, timeLimit]);
+
   // If we need to show the name prompt, show that first
   if (showNamePrompt) {
     return (
@@ -540,10 +742,7 @@ const GameRoom = () => {
         isHost={isHost}
         currentPlayer={currentPlayer}
         onStartGame={() => {
-          console.log('Starting game...');
-          startGame();
-          
-          // Notify socket server that the game has started
+          console.log('🎮 Host is starting the game for all players...');
           if (socket && roomId) {
             socket.emit('startGame', { 
               roomId,
@@ -618,6 +817,62 @@ const GameRoom = () => {
     );
   }
 
+  // Results display component
+  const renderResultsDisplay = () => {
+    if (!showResults || !currentRound?.target) {
+      return null;
+    }
+
+    // Get valid guesses with complete data
+    const validGuesses = players
+      .filter(p => {
+        const hasValidGuess = p.guessLocation && 
+                            typeof p.distanceToTarget === 'number' && 
+                            typeof p.roundScore === 'number';
+        
+        if (!hasValidGuess) {
+          console.log(`Invalid guess data for player ${p.id}:`, {
+            hasLocation: !!p.guessLocation,
+            hasDistance: typeof p.distanceToTarget === 'number',
+            hasScore: typeof p.roundScore === 'number',
+            player: p
+          });
+        }
+        return hasValidGuess;
+      })
+      .map(player => {
+        const guessData = {
+          playerId: player.id,
+          location: player.guessLocation!,
+          score: player.roundScore!,
+          distance: player.distanceToTarget!
+        };
+        console.log(`Mapped guess data for player ${player.id}:`, guessData);
+        return guessData;
+      });
+
+    console.log('Final valid guesses for results:', validGuesses);
+
+    return (
+      <Dialog open={showResults} onOpenChange={setShowResults}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>
+              {currentRound.isComplete ? `Round ${currentRoundIndex + 1} Results` : 'Round Results'}
+            </DialogTitle>
+          </DialogHeader>
+          <ResultsDisplay
+            location={currentRound.target}
+            players={players}
+            guesses={validGuesses}
+            onNextRound={handleNextRound}
+            isLastRound={currentRoundIndex >= gameState.rounds.length - 1}
+          />
+        </DialogContent>
+      </Dialog>
+    );
+  };
+
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar onRestartGame={hasStarted ? handleRestartGame : undefined} roomId={roomId} />
@@ -626,9 +881,12 @@ const GameRoom = () => {
         <div className="flex justify-end items-center flex-shrink-0">
           <div className="flex items-center gap-4">
             <Timer
+              key={`timer-${currentRoundIndex}-${timeLimit}`}
               duration={timeLimit}
               isRunning={isTimerRunning}
-              onComplete={handleGuessSubmit}
+              onComplete={handleTimerComplete}
+              onTimeUpdate={handleTimeUpdate}
+              className="min-w-[200px]"
             />
             <PlayerList 
               players={players} 
@@ -639,14 +897,16 @@ const GameRoom = () => {
 
         <div className="flex-grow grid grid-cols-1 md:grid-cols-2 gap-4">
           <Card className="md:col-span-1 md:row-span-2 order-1 flex flex-col">
-            <CardContent className="p-0 flex-grow min-h-[40vh] md:min-h-0">
-              <StreetView
-                position={currentRound?.target}
-                onLoad={() => console.log('Street view loaded')}
-                isLoaded={isMapApiLoaded}
-                loadError={mapApiLoadError}
-                onError={handleStreetViewError}
-              />
+            <CardContent className="p-0 flex-grow min-h-[40vh] md:min-h-[60vh] relative">
+              {currentRound?.target ? (
+                <div className="absolute inset-0">
+                  <StreetView {...streetViewProps} />
+                </div>
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <p className="text-gray-500">Waiting for location...</p>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -661,25 +921,11 @@ const GameRoom = () => {
               className="flex-grow min-h-[40vh] md:min-h-0"
               isLoaded={isMapApiLoaded}
               loadError={mapApiLoadError}
+              onCenterChange={setMapCenter}
             />
           </Card>
 
-          {showResults && currentRound && (
-            <Dialog open={showResults} onOpenChange={setShowResults}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Round {currentRoundIndex + 1} Results</DialogTitle>
-                </DialogHeader>
-                <ResultsDisplay
-                  location={currentRound.target}
-                  players={players}
-                  guesses={currentRound.guesses}
-                  onNextRound={handleNextRound}
-                  isLastRound={currentRoundIndex >= gameState.rounds.length - 1}
-                />
-              </DialogContent>
-            </Dialog>
-          )}
+          {renderResultsDisplay()}
 
           {hasStarted && (
             <Dialog open={showFinalResults} onOpenChange={setShowFinalResults}>
