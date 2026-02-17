@@ -2,7 +2,7 @@ import React from "react";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Player } from "@/hooks/useGameState";
-import { Trophy, MapPin, ArrowRight } from "lucide-react";
+import { Trophy, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { GoogleMap, Marker, Polyline } from "@react-google-maps/api";
@@ -50,7 +50,7 @@ const ResultsDisplay = ({ players, guesses, location, onNextRound, isLastRound }
   };
 
   return (
-    <Card className="w-full max-w-2xl animate-appear">
+    <Card className="w-full max-w-2xl">
       <CardHeader className="pb-2">
         <CardTitle className="text-xl text-center">
           Round Results
@@ -67,7 +67,8 @@ const ResultsDisplay = ({ players, guesses, location, onNextRound, isLastRound }
             options={{
               streetViewControl: false,
               mapTypeControl: false,
-              fullscreenControl: false
+              fullscreenControl: false,
+              gestureHandling: "cooperative"
             }}
             onLoad={(map) => {
               const bounds = getBounds();
@@ -104,12 +105,12 @@ const ResultsDisplay = ({ players, guesses, location, onNextRound, isLastRound }
                   }}
                 />
                 <Polyline
-                  key={`${guess.playerId}-line-${index}`}
                   path={[location, guess.location]}
                   options={{
                     strokeColor: index === 0 ? "#eab308" : "#6b7280",
                     strokeOpacity: 0.8,
                     strokeWeight: 2,
+                    geodesic: true
                   }}
                 />
               </React.Fragment>
@@ -134,21 +135,20 @@ const ResultsDisplay = ({ players, guesses, location, onNextRound, isLastRound }
                   )}
                   <div>
                     <div className="font-medium">{playerName}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {guess.distance?.toFixed(0)} km away
+                    <div className="text-sm text-muted-foreground">
+                      {guess.distance.toFixed(1)} km away
                     </div>
                   </div>
                 </div>
-                <div>
-                  <Badge 
-                    className={cn(
-                      "font-mono text-md",
-                      index === 0 ? "bg-yellow-500" : "bg-primary"
-                    )}
-                  >
-                    +{guess.score}
-                  </Badge>
-                </div>
+                <Badge 
+                  variant="secondary"
+                  className={cn(
+                    "font-mono text-md",
+                    index === 0 ? "bg-yellow-100 text-yellow-700" : ""
+                  )}
+                >
+                  {guess.score.toLocaleString()} pts
+                </Badge>
               </div>
             );
           })}

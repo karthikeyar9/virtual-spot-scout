@@ -1,218 +1,135 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { AlertCircle } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import React, { useEffect, useRef, useState } from 'react';
+import { cn } from '@/lib/utils';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { RefreshCw } from 'lucide-react';
 
 interface StreetViewProps {
-  position: { lat: number; lng: number } | undefined;
+  position?: { lat: number; lng: number };
+  className?: string;
   onLoad?: () => void;
-  isLoaded: boolean;
-  loadError: Error | undefined;
   onError?: (error: Error) => void;
+  isLoaded: boolean;
+  loadError?: Error | null;
 }
 
-const StreetView: React.FC<StreetViewProps> = ({ 
-  position, 
-  onLoad, 
-  isLoaded, 
-  loadError,
-  onError
+const StreetView: React.FC<StreetViewProps> = ({
+  position,
+  className,
+  onLoad,
+  onError,
+  isLoaded,
+  loadError
 }) => {
-  const [error, setError] = useState<string | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
-  const [isRetrying, setIsRetrying] = useState(false);
-  const mapRef = useRef<HTMLDivElement>(null);
+  const streetViewRef = useRef<HTMLDivElement>(null);
   const panoramaRef = useRef<google.maps.StreetViewPanorama | null>(null);
+  const [loadRetries, setLoadRetries] = useState(0);
+  const [loadingError, setLoadingError] = useState<string | null>(null);
+  const maxRetries = 3;
+  const retryDelay = 2000; // 2 seconds
 
-  // Initialize or update Street View when position changes or maps API loads
-  useEffect(() => {
-    if (!isLoaded || !position || !mapRef.current) return;
+  const initializeStreetView = () => {
+    if (!streetViewRef.current || !position || !isLoaded) return;
 
-    const initStreetView = async () => {
-      try {
-        // Add delay between requests to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 1000));
+    const panorama = new google.maps.StreetViewPanorama(streetViewRef.current, {
+      position,
+      pov: { heading: 0, pitch: 0 },
+      zoom: 1,
+      addressControl: false,
+      showRoadLabels: false,
+      motionTracking: false,
+      fullscreenControl: false,
+      linksControl: false,
+      motionTrackingControl: false,
+      panControl: true,
+      enableCloseButton: false,
+      visible: true
+    });
 
-        // Clean up previous panorama if it exists
-        if (panoramaRef.current) {
-          panoramaRef.current = null;
-        }
-
-        // Create a new Street View panorama
-        const panorama = new google.maps.StreetViewPanorama(mapRef.current, {
-          position: position,
-          pov: { heading: 0, pitch: 0 },
-          addressControl: false,
-          fullscreenControl: false,
-          enableCloseButton: false,
-          showRoadLabels: false,
-          zoomControl: true,
-          panControl: true,
-          motionTracking: false,
-          motionTrackingControl: false,
-          linksControl: true,
-          clickToGo: true,
-          disableDefaultUI: false,
-          visible: true,
-          controlSize: 30,
-          zoomControlOptions: {
-            position: google.maps.ControlPosition.RIGHT_CENTER
-          },
-          panControlOptions: {
-            position: google.maps.ControlPosition.RIGHT_CENTER
-          },
-          scrollwheel: true
-        });
-
-        // Store reference to the panorama
-        panoramaRef.current = panorama;
-        
-        // Call the parent onLoad callback if provided
-        if (onLoad) {
-          onLoad();
-        }
-
-        // Setup error event listener with retry logic
-        const streetViewService = new google.maps.StreetViewService();
-        let retryAttempt = 0;
-        const maxRetries = 3;
-
-        const attemptGetPanorama = async () => {
-          try {
-            await streetViewService.getPanorama({
-              location: position,
-              radius: 50, // Search within 50 meters
-              source: google.maps.StreetViewSource.OUTDOOR
-            });
-            console.log('Street View panorama available for this location');
-          } catch (e) {
-            console.error('Street View error:', e);
-            const errorMessage = e.message || 'Street View not available';
-
-            // If it's a rate limit or quota error, retry after delay
-            if (errorMessage.includes('OVER_QUERY_LIMIT') || errorMessage.includes('RESOURCE_EXHAUSTED')) {
-              if (retryAttempt < maxRetries) {
-                retryAttempt++;
-                console.log(`Retrying (${retryAttempt}/${maxRetries}) after delay...`);
-                await new Promise(resolve => setTimeout(resolve, 2000 * retryAttempt));
-                return attemptGetPanorama();
-              }
-            }
-            
-            setError('No Street View imagery available for this location');
-            
-            // If it's a ZERO_RESULTS error, automatically trigger skip
-            if (errorMessage.includes('ZERO_RESULTS')) {
-              if (onError) {
-                onError(new Error("SKIP_TO_NEXT_LOCATION"));
-              }
-            } else if (onError) {
-              onError(new Error(errorMessage));
-            }
-          }
-        };
-
-        await attemptGetPanorama();
-
-      } catch (e) {
-        console.error('Street View initialization error:', e);
-        setError('Failed to initialize Street View');
-        if (onError) {
-          onError(e instanceof Error ? e : new Error('Unknown error'));
-        }
+    // Handle panorama status changes
+    panorama.addListener('status_changed', () => {
+      const status = panorama.getStatus();
+      console.log('Street View status:', status);
+      
+      if (status === google.maps.StreetViewStatus.OK) {
+        setLoadingError(null);
+        if (onLoad) onLoad();
+      } else if (status === google.maps.StreetViewStatus.ZERO_RESULTS) {
+        if (onError) onError(new Error("SKIP_TO_NEXT_LOCATION"));
       }
-    };
+    });
 
-    initStreetView();
+    // Handle panorama visibility changes and errors
+    panorama.addListener('visible_changed', () => {
+      if (!panorama.getVisible()) {
+        handleLoadError('Street View not available for this location');
+      }
+    });
 
-    // Cleanup function
+    panoramaRef.current = panorama;
+  };
+
+  const handleLoadError = (errorMessage: string) => {
+    console.error('Street View error:', errorMessage);
+    setLoadingError(errorMessage);
+
+    if (loadRetries < maxRetries) {
+      setTimeout(() => {
+        console.log(`Retrying Street View load (attempt ${loadRetries + 1}/${maxRetries})`);
+        setLoadRetries(prev => prev + 1);
+        initializeStreetView();
+      }, retryDelay);
+    } else if (onError) {
+      onError(new Error("SKIP_TO_NEXT_LOCATION"));
+    }
+  };
+
+  const handleRetryClick = () => {
+    setLoadingError(null);
+    setLoadRetries(0);
+    initializeStreetView();
+  };
+
+  useEffect(() => {
+    if (isLoaded && position) {
+      initializeStreetView();
+    }
+
     return () => {
       if (panoramaRef.current) {
-        panoramaRef.current = null;
+        // Clean up listeners and panorama instance
+        google.maps.event.clearInstanceListeners(panoramaRef.current);
       }
     };
-  }, [isLoaded, position, onLoad, onError]);
-
-  // Reset error state when position changes
-  useEffect(() => {
-    setError(null);
-    setIsRetrying(false);
-  }, [position]);
-
-  // Retry loading Street View
-  const handleRetry = useCallback(() => {
-    setError(null);
-    setIsRetrying(true);
-    setRetryCount(prev => prev + 1);
-    
-    // After a brief delay, reset the retrying state
-    setTimeout(() => {
-      setIsRetrying(false);
-    }, 1000);
-  }, []);
-
-  if (!isLoaded || !position) {
-    return (
-      <div className="w-full h-full bg-gray-100 flex items-center justify-center">
-        <p>Loading Street View...</p>
-      </div>
-    );
-  }
+  }, [isLoaded, position]);
 
   if (loadError) {
     return (
-      <div className="w-full h-full bg-gray-100 flex items-center justify-center p-4">
+      <div className={cn("flex items-center justify-center", className)}>
         <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Google Maps Error</AlertTitle>
           <AlertDescription>
-            {loadError.message}. Please check your API key and network connection.
+            Failed to load Street View. Please try again later.
           </AlertDescription>
         </Alert>
       </div>
     );
   }
 
-  if (error) {
+  if (loadingError) {
     return (
-      <div className="w-full h-full bg-gray-100 flex flex-col items-center justify-center p-4">
-        <Alert variant="destructive" className="mb-4">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Street View Error</AlertTitle>
-          <AlertDescription>
-            {error}. This location might not have Street View coverage.
-          </AlertDescription>
+      <div className={cn("flex flex-col items-center justify-center gap-4", className)}>
+        <Alert>
+          <AlertDescription>{loadingError}</AlertDescription>
         </Alert>
-        <div className="flex gap-2">
-          <Button 
-            variant="default" 
-            onClick={handleRetry}
-            disabled={isRetrying}
-          >
-            {isRetrying ? "Retrying..." : "Retry"}
-          </Button>
-          <Button 
-            variant="outline" 
-            onClick={() => {
-              // Notify parent component to skip to next location
-              if (onError) {
-                onError(new Error("SKIP_TO_NEXT_LOCATION"));
-              }
-            }}
-          >
-            Skip to Next Location
-          </Button>
-        </div>
+        <Button onClick={handleRetryClick} variant="outline" size="sm">
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Retry Loading
+        </Button>
       </div>
     );
   }
 
-  return (
-    <div 
-      ref={mapRef} 
-      className="h-full w-full bg-gray-100"
-    />
-  );
+  return <div ref={streetViewRef} className={cn("w-full h-full", className)} />;
 };
 
 export default StreetView;

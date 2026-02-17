@@ -10,6 +10,7 @@ export interface Player {
   isReady: boolean;
   roundScore?: number;
   distanceToTarget?: number;
+  guessLocation?: { lat: number; lng: number };
 }
 
 export interface RoundGuess {

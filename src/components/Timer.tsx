@@ -7,6 +7,7 @@ interface TimerProps {
   duration: number;
   isRunning: boolean;
   onComplete?: () => void;
+  onTimeUpdate?: (time: number) => void;
   className?: string;
 }
 
@@ -14,16 +15,24 @@ const Timer: React.FC<TimerProps> = ({
   duration,
   isRunning,
   onComplete,
+  onTimeUpdate,
   className
 }) => {
   const [timeLeft, setTimeLeft] = useState(duration);
   const [progressValue, setProgressValue] = useState(100);
 
+  // Reset timer only when duration changes or when isRunning changes from false to true
   useEffect(() => {
-    setTimeLeft(duration);
-    setProgressValue(100);
-  }, [duration]);
+    if (duration !== timeLeft || (!timeLeft && isRunning)) {
+      setTimeLeft(duration);
+      setProgressValue(100);
+      if (onTimeUpdate) {
+        onTimeUpdate(duration);
+      }
+    }
+  }, [duration, isRunning]);
 
+  // Handle countdown
   useEffect(() => {
     let timer: NodeJS.Timeout;
 
@@ -31,18 +40,28 @@ const Timer: React.FC<TimerProps> = ({
       timer = setInterval(() => {
         setTimeLeft((prev) => {
           const newTime = prev - 1;
-          setProgressValue((newTime / duration) * 100);
+          const newProgress = (newTime / duration) * 100;
+          setProgressValue(newProgress);
+          
+          if (onTimeUpdate) {
+            onTimeUpdate(newTime);
+          }
+          
+          if (newTime === 0 && onComplete) {
+            onComplete();
+          }
+          
           return newTime;
         });
       }, 1000);
-    } else if (timeLeft === 0 && onComplete) {
-      onComplete();
     }
 
     return () => {
-      if (timer) clearInterval(timer);
+      if (timer) {
+        clearInterval(timer);
+      }
     };
-  }, [isRunning, timeLeft, duration, onComplete]);
+  }, [isRunning, duration, onComplete, onTimeUpdate]);
 
   // Format time as MM:SS
   const formatTime = (seconds: number) => {
@@ -59,7 +78,7 @@ const Timer: React.FC<TimerProps> = ({
   };
 
   return (
-    <div className={cn("space-y-2 min-w-[200px]", className)}>
+    <div className={cn("space-y-2", className)}>
       <div className="flex items-center justify-between">
         <div className="flex items-center">
           <Clock className="mr-2 h-4 w-4" />
