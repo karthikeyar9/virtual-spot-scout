@@ -15,26 +15,31 @@ interface Player {
 
 interface GameLobbyProps {
   roomId: string;
+  gameType: string;
   players: Player[];
   isHost: boolean;
   currentPlayer: Player | null;
   onStartGame: () => void;
   onToggleReady: () => void;
+  gameName?: string;
 }
 
-const GameLobby = ({ 
-  roomId, 
-  players, 
-  isHost, 
-  currentPlayer, 
-  onStartGame, 
-  onToggleReady 
+const GameLobby = ({
+  roomId,
+  gameType,
+  players,
+  isHost,
+  currentPlayer,
+  onStartGame,
+  onToggleReady,
+  gameName
 }: GameLobbyProps) => {
   const { toast } = useToast();
   const [isCopied, setIsCopied] = useState(false);
 
   const copyInviteLink = () => {
-    const url = `${window.location.origin}/game/${roomId}`;
+    // Use the full game path including gameType so the link routes correctly
+    const url = `${window.location.origin}/game/${gameType}/${roomId}`;
     navigator.clipboard.writeText(url);
     setIsCopied(true);
     toast({
@@ -49,12 +54,12 @@ const GameLobby = ({
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Navbar roomId={roomId} />
+      <Navbar roomId={roomId} gameName={gameName} />
       <div className="flex-1 flex items-center justify-center p-4">
         <Card className="w-full max-w-2xl mx-auto">
           <CardHeader>
             <CardTitle className="text-2xl font-bold text-center">
-              Game Lobby
+              {gameName ? `${gameName} - Lobby` : 'Game Lobby'}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -94,6 +99,11 @@ const GameLobby = ({
                       </Badge>
                     </div>
                   ))}
+                  {players.length === 0 && (
+                    <div className="text-center py-4 text-muted-foreground">
+                      Waiting for players to join...
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -106,7 +116,7 @@ const GameLobby = ({
             >
               {currentPlayer?.isReady ? "Not Ready" : "Ready"}
             </Button>
-            
+
             {isHost && currentPlayer?.isReady && (
               <Button
                 disabled={!canStartGame}

@@ -13,9 +13,10 @@ import { useToast } from '@/hooks/use-toast';
 interface NavbarProps {
   onRestartGame?: () => void;
   roomId?: string;
+  gameName?: string;
 }
 
-const Navbar: React.FC<NavbarProps> = ({ onRestartGame, roomId }) => {
+const Navbar: React.FC<NavbarProps> = ({ onRestartGame, roomId, gameName }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -34,7 +35,8 @@ const Navbar: React.FC<NavbarProps> = ({ onRestartGame, roomId }) => {
 
   const handleShareGame = () => {
     if (roomId) {
-      const shareUrl = `${window.location.origin}/game/${roomId}`;
+      // Use current pathname which already includes /game/:gameType/:roomId
+      const shareUrl = `${window.location.origin}${location.pathname}`;
       navigator.clipboard.writeText(shareUrl);
       toast({
         title: "Link Copied!",
@@ -50,6 +52,9 @@ const Navbar: React.FC<NavbarProps> = ({ onRestartGame, roomId }) => {
           <Link to="/" className="flex items-center gap-2">
             <Globe className="h-5 w-5 text-primary" />
             <span className="font-bold text-lg">Virtual Scout</span>
+            {gameName && (
+              <span className="text-sm text-muted-foreground hidden sm:inline">/ {gameName}</span>
+            )}
           </Link>
         </div>
 
