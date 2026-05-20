@@ -14,20 +14,22 @@ const JoinRedirect: React.FC = () => {
   const [error, setError] = useState(false);
 
   useEffect(() => {
+    // Don't start the timeout until we're actually connected — the socket
+    // may still be waking up the backend (Render cold start can take 60s+).
     if (!socket || !isConnected || !roomId) return;
 
     socket.emit('getRoomState', { roomId });
 
     const handleRoomState = (roomState: any) => {
       const gameType = roomState.gameType || 'city-guesser';
-      // Preserve query params when redirecting
       const params = searchParams.toString();
       navigate(`/game/${gameType}/${roomId}${params ? `?${params}` : ''}`, { replace: true });
     };
 
+    // Only give 10s for the room lookup itself (socket is already connected here)
     const timeout = setTimeout(() => {
       setError(true);
-    }, 5000);
+    }, 10000);
 
     socket.on('roomState', handleRoomState);
 
@@ -58,8 +60,13 @@ const JoinRedirect: React.FC = () => {
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
-      <div className="flex items-center justify-center flex-1">
-        <p>Joining room {roomId}...</p>
+      <div className="flex items-center justify-center flex-1 flex-col gap-2">
+        <p className="text-lg font-medium">
+          {isConnected ? `Joining room ${roomId}...` : 'Connecting to server...'}
+        </p>
+        {!isConnected && (
+          <p className="text-sm text-muted-foreground">The server may be waking up, please wait.</p>
+        )}
       </div>
     </div>
   );

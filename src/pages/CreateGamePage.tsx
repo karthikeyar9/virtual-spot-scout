@@ -8,18 +8,16 @@ import { Slider } from "@/components/ui/slider";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
-import { Clock, User, ArrowLeft } from "lucide-react";
+import { Clock, User, ArrowLeft, Loader2 } from "lucide-react";
 import { getGame } from "@/games/registry";
 import Navbar from "@/components/Navbar";
 import { useSocket } from "@/hooks/useSocket";
-import { useToast } from "@/hooks/use-toast";
 import { v4 as uuidv4 } from 'uuid';
 
 const CreateGamePage: React.FC = () => {
   const { gameType } = useParams<{ gameType: string }>();
   const navigate = useNavigate();
-  const { socket, isConnected, error } = useSocket();
-  const { toast } = useToast();
+  const { socket, isConnected } = useSocket();
 
   const game = gameType ? getGame(gameType) : undefined;
 
@@ -38,15 +36,7 @@ const CreateGamePage: React.FC = () => {
     }
   }, [game]);
 
-  useEffect(() => {
-    if (error) {
-      toast({
-        title: "Connection Error",
-        description: "Could not connect to the game server.",
-        variant: "destructive",
-      });
-    }
-  }, [error, toast]);
+  // Socket retries automatically — no need to surface transient errors here.
 
   if (!game || !gameType) {
     return (
@@ -70,41 +60,31 @@ const CreateGamePage: React.FC = () => {
 
   const handleCreateRoom = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!playerName.trim()) return;
+    if (!playerName.trim() || !socket || !isConnected) return;
     setIsCreating(true);
 
     const roomId = `room-${Math.floor(Math.random() * 10000)}`;
     const playerId = uuidv4();
 
-    if (socket && isConnected) {
-      socket.emit('joinRoom', {
-        roomId,
-        playerName,
-        playerId,
-        isHost: true,
-        gameType,
-      });
+    socket!.emit('joinRoom', {
+      roomId,
+      playerName,
+      playerId,
+      isHost: true,
+      gameType,
+    });
 
-      const params = new URLSearchParams({
-        name: playerName,
-        host: 'true',
-        playerId,
-      });
+    const params = new URLSearchParams({
+      name: playerName,
+      host: 'true',
+      playerId,
+    });
 
-      // Add config values as params
-      Object.entries(configValues).forEach(([key, value]) => {
-        params.set(key, String(value));
-      });
+    Object.entries(configValues).forEach(([key, value]) => {
+      params.set(key, String(value));
+    });
 
-      navigate(`/game/${gameType}/${roomId}?${params.toString()}`);
-    } else {
-      toast({
-        title: "Connection Error",
-        description: "Could not connect to the game server.",
-        variant: "destructive",
-      });
-      setIsCreating(false);
-    }
+    navigate(`/game/${gameType}/${roomId}?${params.toString()}`);
   };
 
   return (
@@ -188,8 +168,10 @@ const CreateGamePage: React.FC = () => {
                 </div>
               ))}
 
-              <Button type="submit" className="w-full" disabled={isCreating || !playerName.trim()}>
-                {isCreating ? "Creating Room..." : "Create Room"}
+              <Button type="submit" className="w-full" disabled={isCreating || !playerName.trim() || !isConnected}>
+                {!isConnected ? (
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Connecting to server...</>
+                ) : isCreating ? "Creating Room..." : "Create Room"}
               </Button>
 
               <Button
