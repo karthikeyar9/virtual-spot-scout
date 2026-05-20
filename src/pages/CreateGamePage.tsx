@@ -63,7 +63,7 @@ const CreateGamePage: React.FC = () => {
     if (!playerName.trim() || !socket || !isConnected) return;
     setIsCreating(true);
 
-    const roomId = `room-${Math.floor(Math.random() * 10000)}`;
+    const roomId = `room-${uuidv4().slice(0, 8)}`;
     const playerId = uuidv4();
 
     socket!.emit('joinRoom', {
