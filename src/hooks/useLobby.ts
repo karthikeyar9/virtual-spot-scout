@@ -133,7 +133,9 @@ export const useLobby = (roomId: string | undefined, gameType: string) => {
 
     const handleRoomState = (roomState: any) => {
       console.log('📋 useLobby roomState:', roomState);
-      if (roomState.hasStarted) setHasStarted(true);
+      // Mirror the server: if it restarted and lost the game, drop back to
+      // the lobby instead of leaving a frozen board on screen.
+      if (typeof roomState.hasStarted === 'boolean') setHasStarted(roomState.hasStarted);
       if (roomState.players) setPlayers(roomState.players);
       if (roomState.gameData) setGameData(roomState.gameData);
     };
@@ -167,6 +169,26 @@ export const useLobby = (roomId: string | undefined, gameType: string) => {
       socket.off('errorMessage', handleErrorMessage);
     };
   }, [socket, isConnected, roomId]);
+
+  // Re-join after a socket reconnect: the server sees a brand-new socket
+  // with no room membership or socket.data, so without this every broadcast
+  // (moves, player updates) silently stops reaching us.
+  useEffect(() => {
+    if (!socket || !isConnected || !roomId) return;
+    if (!hasJoinedRef.current || !playerId) return;
+
+    const info = getPlayerInfo();
+    if (!info || info.roomId !== roomId) return;
+
+    console.log('🔁 useLobby: (re)asserting room membership after (re)connect');
+    socket.emit('joinRoom', {
+      roomId,
+      playerName: info.playerName,
+      playerId,
+      isHost: info.isHost,
+      gameType,
+    });
+  }, [socket, isConnected, roomId, playerId, gameType]);
 
   // Reset join guard when roomId changes
   useEffect(() => {
