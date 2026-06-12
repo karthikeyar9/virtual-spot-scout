@@ -1,46 +1,6 @@
-// Emoji Decoder game handler
+// Emoji Decoder game handler — puzzles come from the SQLite bank.
 
-const puzzles = [
-  { emojis: "🦁👑", answer: "The Lion King", category: "Movie", hint: "Disney classic" },
-  { emojis: "⭐️⚔️", answer: "Star Wars", category: "Movie", hint: "A galaxy far far away" },
-  { emojis: "🕷️🧑", answer: "Spider-Man", category: "Movie", hint: "Friendly neighborhood hero" },
-  { emojis: "🧊❄️👸", answer: "Frozen", category: "Movie", hint: "Let it go" },
-  { emojis: "🏠⬆️🎈", answer: "Up", category: "Movie", hint: "Pixar tearjerker" },
-  { emojis: "🦈🌊", answer: "Jaws", category: "Movie", hint: "You're gonna need a bigger boat" },
-  { emojis: "👻👻🔫", answer: "Ghostbusters", category: "Movie", hint: "Who you gonna call?" },
-  { emojis: "🧙‍♂️💍", answer: "Lord of the Rings", category: "Movie", hint: "One ring to rule them all" },
-  { emojis: "🦇🧑‍🦲", answer: "Batman", category: "Movie", hint: "Dark Knight" },
-  { emojis: "🚢❄️💑", answer: "Titanic", category: "Movie", hint: "I'm the king of the world" },
-  { emojis: "🎃🔪", answer: "Halloween", category: "Movie", hint: "Spooky slasher" },
-  { emojis: "🐀👨‍🍳", answer: "Ratatouille", category: "Movie", hint: "Anyone can cook" },
-  { emojis: "🏝️🦕", answer: "Jurassic Park", category: "Movie", hint: "Life finds a way" },
-  { emojis: "🤖❤️🌱", answer: "Wall-E", category: "Movie", hint: "Lonely robot" },
-  { emojis: "🎵🎤👩‍🎤⭐", answer: "A Star Is Born", category: "Movie", hint: "Musical drama" },
-  { emojis: "🍕🐢🥷", answer: "Teenage Mutant Ninja Turtles", category: "Show", hint: "Cowabunga!" },
-  { emojis: "🔴💊🔵💊", answer: "The Matrix", category: "Movie", hint: "Red pill or blue pill" },
-  { emojis: "🧹⚡🏰", answer: "Harry Potter", category: "Movie", hint: "You're a wizard" },
-  { emojis: "🐠🔍", answer: "Finding Nemo", category: "Movie", hint: "Just keep swimming" },
-  { emojis: "👨‍🚀🌙", answer: "Apollo 13", category: "Movie", hint: "Houston we have a problem" },
-  { emojis: "🎪🐘", answer: "Dumbo", category: "Movie", hint: "Flying elephant" },
-  { emojis: "🧟‍♂️🌍", answer: "World War Z", category: "Movie", hint: "Zombie apocalypse" },
-  { emojis: "🏎️💨", answer: "Fast and Furious", category: "Movie", hint: "Family" },
-  { emojis: "🐒👑🌴", answer: "Tarzan", category: "Movie", hint: "Raised by apes" },
-  { emojis: "🎭😂😭", answer: "Inside Out", category: "Movie", hint: "Emotions as characters" },
-  { emojis: "☕️👫👫👫", answer: "Friends", category: "Show", hint: "I'll be there for you" },
-  { emojis: "🧪💎👨‍🔬", answer: "Breaking Bad", category: "Show", hint: "Say my name" },
-  { emojis: "👑🐉🏰⚔️", answer: "Game of Thrones", category: "Show", hint: "Winter is coming" },
-  { emojis: "🍌💰🏗️", answer: "Arrested Development", category: "Show", hint: "There's always money in the..." },
-  { emojis: "🧟‍♂️🚶‍♂️", answer: "The Walking Dead", category: "Show", hint: "Zombie survival" },
-];
-
-function shuffle(arr) {
-  const shuffled = [...arr];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  return shuffled;
-}
+const { getRandomEmojiPuzzles } = require('../db');
 
 function normalize(str) {
   return str.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -48,9 +8,8 @@ function normalize(str) {
 
 function onStart(room) {
   const totalRounds = room.totalRounds || 10;
-  const shuffled = shuffle(puzzles);
   room.gameState = {
-    puzzles: shuffled.slice(0, totalRounds),
+    puzzles: getRandomEmojiPuzzles(totalRounds),
     currentPuzzleIndex: 0,
     solved: false,
     guessedCorrectly: {},

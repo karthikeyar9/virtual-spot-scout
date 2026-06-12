@@ -1,5 +1,5 @@
 import { lazy } from 'react';
-import { Globe, HelpCircle, ThumbsUp, Smile } from 'lucide-react';
+import { Globe, HelpCircle, ThumbsUp, Smile, Crown } from 'lucide-react';
 import { GameDefinition } from './types';
 
 export const games: Record<string, GameDefinition> = {
@@ -8,7 +8,7 @@ export const games: Record<string, GameDefinition> = {
     name: 'Virtual City Guesser',
     description: 'Guess world locations from street view images. Compete to pinpoint cities most accurately!',
     icon: Globe,
-    color: 'bg-blue-500',
+    color: 'bg-gradient-to-br from-sky-500 to-blue-600',
     minPlayers: 1,
     maxPlayers: 10,
     component: lazy(() => import('./city-guesser/CityGuesserGame')),
@@ -41,7 +41,7 @@ export const games: Record<string, GameDefinition> = {
     name: 'Trivia Blitz',
     description: 'Answer multiple-choice questions. First correct answer gets a speed bonus!',
     icon: HelpCircle,
-    color: 'bg-purple-500',
+    color: 'bg-gradient-to-br from-violet-500 to-purple-600',
     minPlayers: 1,
     maxPlayers: 10,
     component: lazy(() => import('./trivia/TriviaGame')),
@@ -74,7 +74,7 @@ export const games: Record<string, GameDefinition> = {
     name: 'Hot Takes',
     description: 'Vote on spicy prompts and see how your friends compare! Would you rather...?',
     icon: ThumbsUp,
-    color: 'bg-orange-500',
+    color: 'bg-gradient-to-br from-orange-500 to-rose-500',
     minPlayers: 2,
     maxPlayers: 10,
     component: lazy(() => import('./hot-takes/HotTakesGame')),
@@ -106,7 +106,7 @@ export const games: Record<string, GameDefinition> = {
     name: 'Emoji Decoder',
     description: 'Guess the movie, phrase, or thing from emoji clues. Type your guesses fast!',
     icon: Smile,
-    color: 'bg-yellow-500',
+    color: 'bg-gradient-to-br from-amber-400 to-orange-500',
     minPlayers: 1,
     maxPlayers: 10,
     component: lazy(() => import('./emoji-decoder/EmojiDecoderGame')),
@@ -132,6 +132,17 @@ export const games: Record<string, GameDefinition> = {
         defaultValue: 30,
       },
     ],
+  },
+  'chess': {
+    id: 'chess',
+    name: 'Chess',
+    description: 'The classic game of kings. Outplay your opponent in a head-to-head battle of wits!',
+    icon: Crown,
+    color: 'bg-gradient-to-br from-emerald-500 to-teal-600',
+    minPlayers: 2,
+    maxPlayers: 2,
+    component: lazy(() => import('./chess/ChessGame')),
+    configFields: [],
   },
 };
 

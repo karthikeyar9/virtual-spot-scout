@@ -1,42 +1,11 @@
-// Hot Takes / Would You Rather game handler
+// Hot Takes / Would You Rather game handler — prompts come from the SQLite bank.
 
-const prompts = [
-  { question: "Would you rather...", optionA: "Be able to fly", optionB: "Be able to read minds" },
-  { question: "Would you rather...", optionA: "Live without music", optionB: "Live without movies" },
-  { question: "Would you rather...", optionA: "Always be 10 minutes late", optionB: "Always be 20 minutes early" },
-  { question: "Would you rather...", optionA: "Have unlimited money", optionB: "Have unlimited time" },
-  { question: "Would you rather...", optionA: "Live in the mountains", optionB: "Live by the beach" },
-  { question: "Would you rather...", optionA: "Be famous", optionB: "Be the best friend of someone famous" },
-  { question: "Would you rather...", optionA: "Travel to the past", optionB: "Travel to the future" },
-  { question: "Would you rather...", optionA: "Only eat pizza forever", optionB: "Never eat pizza again" },
-  { question: "Would you rather...", optionA: "Have super strength", optionB: "Have super speed" },
-  { question: "Would you rather...", optionA: "Know every language", optionB: "Play every instrument" },
-  { question: "Would you rather...", optionA: "Never use social media again", optionB: "Never watch a movie again" },
-  { question: "Would you rather...", optionA: "Be the funniest person in the room", optionB: "Be the smartest person in the room" },
-  { question: "Would you rather...", optionA: "Have a personal chef", optionB: "Have a personal trainer" },
-  { question: "Would you rather...", optionA: "Always know the truth", optionB: "Always get away with lying" },
-  { question: "Would you rather...", optionA: "Live in a tiny home", optionB: "Live in a mansion you must clean yourself" },
-  { question: "Hot take:", optionA: "Pineapple belongs on pizza", optionB: "Pineapple does NOT belong on pizza" },
-  { question: "Hot take:", optionA: "Cats are better than dogs", optionB: "Dogs are better than cats" },
-  { question: "Hot take:", optionA: "Morning person", optionB: "Night owl" },
-  { question: "Hot take:", optionA: "Books are better than movies", optionB: "Movies are better than books" },
-  { question: "Hot take:", optionA: "Summer is the best season", optionB: "Winter is the best season" },
-];
-
-function shuffle(arr) {
-  const shuffled = [...arr];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  return shuffled;
-}
+const { getRandomHotTakesPrompts } = require('../db');
 
 function onStart(room) {
   const totalRounds = room.totalRounds || 10;
-  const shuffled = shuffle(prompts);
   room.gameState = {
-    prompts: shuffled.slice(0, totalRounds),
+    prompts: getRandomHotTakesPrompts(totalRounds),
     currentPromptIndex: 0,
     votes: {},
   };

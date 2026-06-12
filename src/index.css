@@ -14,26 +14,26 @@
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
 
-    --primary: 201 94% 41%;
+    --primary: 243 75% 59%;
     --primary-foreground: 210 40% 98%;
 
-    --secondary: 187 75% 64%;
+    --secondary: 220 60% 94%;
     --secondary-foreground: 222.2 47.4% 11.2%;
 
-    --muted: 210 40% 96.1%;
+    --muted: 220 40% 95%;
     --muted-foreground: 215.4 16.3% 46.9%;
 
-    --accent: 202 100% 90%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 250 95% 92%;
+    --accent-foreground: 243 47% 30%;
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --border: 220 25% 90%;
+    --input: 220 25% 90%;
+    --ring: 243 75% 59%;
 
-    --radius: 0.5rem;
+    --radius: 0.75rem;
 
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
@@ -130,4 +130,47 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* Soft animated aurora backdrop used on full-page screens */
+.bg-aurora {
+  position: relative;
+  background:
+    radial-gradient(60rem 32rem at 10% -10%, hsl(243 90% 92%) 0%, transparent 60%),
+    radial-gradient(50rem 30rem at 110% 10%, hsl(190 90% 90%) 0%, transparent 60%),
+    radial-gradient(45rem 28rem at 50% 120%, hsl(280 85% 93%) 0%, transparent 60%),
+    hsl(var(--background));
+}
+
+.gradient-text {
+  background: linear-gradient(120deg, hsl(243 75% 55%), hsl(280 70% 55%), hsl(199 89% 48%));
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: gradient-pan 6s ease infinite;
+}
+
+@keyframes gradient-pan {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.float-slow {
+  animation: float 7s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-14px); }
+}
+
+/* Game cards on the home screen */
+.game-card {
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.game-card:hover {
+  transform: translateY(-6px) scale(1.02);
+  box-shadow: 0 20px 40px -18px hsl(243 75% 59% / 0.35);
 }

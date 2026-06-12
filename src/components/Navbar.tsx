@@ -46,12 +46,14 @@ const Navbar: React.FC<NavbarProps> = ({ onRestartGame, roomId, gameName }) => {
   };
 
   return (
-    <div className="sticky top-0 z-50 bg-background/95 backdrop-blur-sm border-b">
+    <div className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b border-border/60 shadow-sm">
       <div className="container mx-auto px-4 py-2 flex justify-between items-center">
         <div className="flex items-center gap-2">
-          <Link to="/" className="flex items-center gap-2">
-            <Globe className="h-5 w-5 text-primary" />
-            <span className="font-bold text-lg">Virtual Scout</span>
+          <Link to="/" className="flex items-center gap-2 group">
+            <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
+              <Globe className="h-4 w-4 text-white" />
+            </span>
+            <span className="font-bold text-lg tracking-tight">Virtual Scout</span>
             {gameName && (
               <span className="text-sm text-muted-foreground hidden sm:inline">/ {gameName}</span>
             )}

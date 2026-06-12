@@ -88,10 +88,10 @@ const CreateGamePage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-blue-50 to-cyan-50">
+    <div className="min-h-screen flex flex-col bg-aurora">
       <Navbar />
       <div className="flex-1 flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
+        <Card className="w-full max-w-md bg-white/70 backdrop-blur-md border-white/60 shadow-lg animate-appear">
           <CardHeader>
             <div className="flex items-center gap-3 mb-2">
               <div className={`w-10 h-10 rounded-lg ${game.color} flex items-center justify-center`}>

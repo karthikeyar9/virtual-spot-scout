@@ -57,6 +57,14 @@ const PORT = process.env.PORT || 3001;
 // Store rooms
 const rooms = {};
 
+// Game-specific payload for gameStarted/roomState, delegated to the game handler
+function buildGameData(room) {
+  if (!room.gameState) return undefined;
+  const handler = getGameHandler(room.gameType);
+  if (!handler || !handler.getGameData) return undefined;
+  return handler.getGameData(room) || undefined;
+}
+
 // Socket.IO connection handlers
 io.on('connection', (socket) => {
   console.log('✨ New connection:', socket.id);
@@ -68,22 +76,13 @@ io.on('connection', (socket) => {
   // Room state request
   socket.on('getRoomState', ({ roomId }) => {
     if (rooms[roomId]) {
-      // Build gameData if game is active
-      const gameData = {};
-      if (rooms[roomId].hasStarted && rooms[roomId].gameState) {
-        if (rooms[roomId].gameType === 'city-guesser' && rooms[roomId].gameState.locations) {
-          gameData.locations = rooms[roomId].gameState.locations;
-          gameData.backupLocations = rooms[roomId].gameState.backupLocations;
-        }
-      }
-
       socket.emit('roomState', {
         hasStarted: rooms[roomId].hasStarted,
         players: rooms[roomId].players,
         currentRound: rooms[roomId].currentRound,
         totalRounds: rooms[roomId].totalRounds,
         gameType: rooms[roomId].gameType,
-        gameData: Object.keys(gameData).length > 0 ? gameData : undefined,
+        gameData: rooms[roomId].hasStarted ? buildGameData(rooms[roomId]) : undefined,
       });
     } else {
       rooms[roomId] = {
@@ -150,22 +149,13 @@ io.on('connection', (socket) => {
 
     io.to(roomId).emit('playersUpdated', { players: rooms[roomId].players });
 
-    // Build gameData for mid-game rejoins
-    const gameData = {};
-    if (rooms[roomId].hasStarted && rooms[roomId].gameState) {
-      if (rooms[roomId].gameType === 'city-guesser' && rooms[roomId].gameState.locations) {
-        gameData.locations = rooms[roomId].gameState.locations;
-        gameData.backupLocations = rooms[roomId].gameState.backupLocations;
-      }
-    }
-
     socket.emit('roomState', {
       hasStarted: rooms[roomId].hasStarted,
       players: rooms[roomId].players,
       currentRound: rooms[roomId].currentRound,
       totalRounds: rooms[roomId].totalRounds,
       gameType: rooms[roomId].gameType,
-      gameData: Object.keys(gameData).length > 0 ? gameData : undefined,
+      gameData: rooms[roomId].hasStarted ? buildGameData(rooms[roomId]) : undefined,
     });
   });
 
@@ -192,6 +182,12 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const pendingHandler = getGameHandler(gameType || rooms[roomId].gameType);
+    if (pendingHandler && pendingHandler.minPlayers && rooms[roomId].players.length < pendingHandler.minPlayers) {
+      socket.emit('errorMessage', { message: `This game needs at least ${pendingHandler.minPlayers} players` });
+      return;
+    }
+
     rooms[roomId].hasStarted = true;
     rooms[roomId].currentRound = 0;
     rooms[roomId].totalRounds = rounds;
@@ -214,16 +210,7 @@ io.on('connection', (socket) => {
 
     console.log(`🎮 Game started in room ${roomId} [${rooms[roomId].gameType}] with ${rounds} rounds`);
 
-    // Send game-specific data with the gameStarted event
-    const gameData = {};
-    if (rooms[roomId].gameState) {
-      if (rooms[roomId].gameType === 'city-guesser' && rooms[roomId].gameState.locations) {
-        gameData.locations = rooms[roomId].gameState.locations;
-        gameData.backupLocations = rooms[roomId].gameState.backupLocations;
-      }
-    }
-
-    io.to(roomId).emit('gameStarted', { gameData });
+    io.to(roomId).emit('gameStarted', { gameData: buildGameData(rooms[roomId]) || {} });
     io.to(roomId).emit('playersUpdated', { players: rooms[roomId].players });
   });
 
@@ -239,11 +226,10 @@ io.on('connection', (socket) => {
     if (!rooms[roomId].currentRound) rooms[roomId].currentRound = 0;
     rooms[roomId].currentRound++;
 
-    // Advance city-guesser round index and target
-    if (rooms[roomId].gameType === 'city-guesser' && rooms[roomId].gameState) {
-      const gs = rooms[roomId].gameState;
-      gs.currentRoundIndex = rooms[roomId].currentRound;
-      gs.currentTarget = gs.locations[gs.currentRoundIndex] || null;
+    // Let the game handler advance its own round state
+    const roundHandler = getGameHandler(rooms[roomId].gameType);
+    if (roundHandler && roundHandler.onNextRound) {
+      roundHandler.onNextRound(rooms[roomId]);
     }
 
     const isGameComplete = rooms[roomId].currentRound >= rooms[roomId].totalRounds;

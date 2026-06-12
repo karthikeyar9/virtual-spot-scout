@@ -39,6 +39,14 @@ Games are registered in two mirrored registries — one on each side:
 
 To add a new game, create a component directory under `src/games/<id>/` implementing `GameComponentProps` (from `src/games/types.ts`), add a handler at `backend/games/<id>.js`, and register both in their respective registries.
 
+Handlers can optionally export `getGameData(room)` (game-specific payload sent with `gameStarted`/`roomState` for joins and mid-game rejoins), `onNextRound(room)` (called by the shared `nextRound` event), and `minPlayers` (enforced server-side in `startGame`).
+
+Current games: `city-guesser`, `trivia`, `hot-takes`, `emoji-decoder`, and `chess` (server-authoritative via chess.js; 2 players, host plays white).
+
+### Question Database
+
+Trivia questions, Hot Takes prompts, and Emoji Decoder puzzles live in a SQLite database (`better-sqlite3`) at `backend/db/games.db` (gitignored). Seed banks are in `backend/db/seed/*.js`; `backend/db/index.js` creates the schema on startup and re-seeds any table whose row count differs from its seed bank, so editing a seed file ships the change on next boot. Handlers fetch random rows via `getRandomTriviaQuestions/getRandomHotTakesPrompts/getRandomEmojiPuzzles(limit)`.
+
 ### Routing
 
 ```
@@ -70,3 +78,8 @@ Distance-based scoring is implemented client-side in `src/hooks/useGameState.ts`
 ### UI Components
 
 shadcn/ui components live in `src/components/ui/`. Custom game components (`GameLobby`, `GameRoom`, `Navbar`, etc.) are in `src/components/`. Path alias `@/` maps to `src/`.
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+<!-- SPECKIT END -->

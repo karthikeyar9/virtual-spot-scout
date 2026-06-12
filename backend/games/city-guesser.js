@@ -123,6 +123,23 @@ function onStart(room) {
   room.gameState.currentTarget = room.gameState.locations[0];
 }
 
+// Data sent alongside gameStarted/roomState so (re)joining clients can render the round
+function getGameData(room) {
+  if (!room.gameState || !room.gameState.locations) return null;
+  return {
+    locations: room.gameState.locations,
+    backupLocations: room.gameState.backupLocations,
+  };
+}
+
+// Called by the shared nextRound event after room.currentRound is incremented
+function onNextRound(room) {
+  const gs = room.gameState;
+  if (!gs) return;
+  gs.currentRoundIndex = room.currentRound;
+  gs.currentTarget = gs.locations[gs.currentRoundIndex] || null;
+}
+
 function registerEvents(socket, io, rooms) {
   // Client requests current round location (for late joiners or reconnects)
   socket.on('city-guesser:getLocation', ({ roomId }) => {
@@ -205,4 +222,4 @@ function registerEvents(socket, io, rooms) {
   });
 }
 
-module.exports = { onStart, registerEvents };
+module.exports = { onStart, registerEvents, getGameData, onNextRound };

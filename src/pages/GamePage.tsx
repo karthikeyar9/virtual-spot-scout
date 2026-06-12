@@ -188,7 +188,7 @@ const GamePage: React.FC = () => {
   const GameComponent = game.component;
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col bg-aurora">
       <Navbar roomId={roomId} gameName={game.name} />
       <Suspense fallback={
         <div className="flex items-center justify-center flex-1">

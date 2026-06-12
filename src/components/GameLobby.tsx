@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Copy, Share2, PlayCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { getGame } from "@/games/registry";
 import Navbar from './Navbar';
 
 interface Player {
@@ -49,14 +50,16 @@ const GameLobby = ({
     setTimeout(() => setIsCopied(false), 2000);
   };
 
+  const minPlayers = getGame(gameType)?.minPlayers ?? 1;
   const allPlayersReady = players.length > 0 && players.every(player => player.isReady);
-  const canStartGame = allPlayersReady;
+  const hasEnoughPlayers = players.length >= minPlayers;
+  const canStartGame = allPlayersReady && hasEnoughPlayers;
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col bg-aurora">
       <Navbar roomId={roomId} gameName={gameName} />
       <div className="flex-1 flex items-center justify-center p-4">
-        <Card className="w-full max-w-2xl mx-auto">
+        <Card className="w-full max-w-2xl mx-auto bg-white/70 backdrop-blur-md border-white/60 shadow-lg animate-appear">
           <CardHeader>
             <CardTitle className="text-2xl font-bold text-center">
               {gameName ? `${gameName} - Lobby` : 'Game Lobby'}
@@ -86,6 +89,9 @@ const GameLobby = ({
                       className="flex items-center justify-between p-3 bg-secondary rounded-lg"
                     >
                       <div className="flex items-center gap-2">
+                        <span className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-sm font-bold flex items-center justify-center shrink-0">
+                          {player.name.charAt(0).toUpperCase()}
+                        </span>
                         <span>{player.name}</span>
                         {player.isHost && (
                           <Badge variant="outline">Host</Badge>
@@ -125,7 +131,9 @@ const GameLobby = ({
                 variant="default"
               >
                 <PlayCircle className="mr-2 h-4 w-4" />
-                {!allPlayersReady ? "Waiting..." : "Start Game"}
+                {!hasEnoughPlayers
+                  ? `Need ${minPlayers} players`
+                  : !allPlayersReady ? "Waiting..." : "Start Game"}
               </Button>
             )}
           </CardFooter>

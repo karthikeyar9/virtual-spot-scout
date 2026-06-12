@@ -1,10 +1,10 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "WebSocket server for the Virtual City Guesser game",
+  "description": "WebSocket server for the Virtual Spot Scout game platform",
   "main": "server.js",
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=20.0.0"
   },
   "scripts": {
     "start": "node server.js",
@@ -16,6 +16,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "better-sqlite3": "^12.10.0",
+    "chess.js": "^1.4.0",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "socket.io": "^4.8.1"

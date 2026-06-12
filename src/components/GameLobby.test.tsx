@@ -106,6 +106,7 @@ describe('GameLobby Component', () => {
       <BrowserRouter>
         <GameLobby
           roomId="test-room-123"
+          gameType="city-guesser"
           players={mockPlayers}
           isHost={true}
           currentPlayer={currentPlayer}
@@ -150,7 +151,7 @@ describe('GameLobby Component', () => {
       fireEvent.click(shareButton);
       
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        expect.stringContaining('/game/test-room-123')
+        expect.stringContaining('/game/city-guesser/test-room-123')
       );
     }
   });

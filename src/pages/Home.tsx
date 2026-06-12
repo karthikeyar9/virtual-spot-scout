@@ -46,14 +46,16 @@ const Home: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-blue-50 to-cyan-50">
+    <div className="min-h-screen flex flex-col bg-aurora">
       <Navbar />
       <div className="flex-1 flex items-center justify-center p-4">
         <div className="max-w-6xl w-full mx-auto flex flex-col items-center">
-          <div className="text-center mb-10 animate-appear">
-            <h1 className="text-5xl font-bold text-primary mb-4 flex items-center justify-center">
-              <Gamepad2 className="mr-3 h-10 w-10" />
-              Virtual Spot Scout
+          <div className="text-center mb-12 animate-appear">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-lg shadow-indigo-500/30 mb-6 float-slow">
+              <Gamepad2 className="h-8 w-8 text-white" />
+            </div>
+            <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight mb-4">
+              <span className="gradient-text">Virtual Spot Scout</span>
             </h1>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
               Pick a game, create a room, and play with friends! A party game platform for everyone.
@@ -61,17 +63,18 @@ const Home: React.FC = () => {
           </div>
 
           {/* Game Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 w-full max-w-5xl mb-10 animate-appear" style={{ animationDelay: "0.1s" }}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-5xl mb-12 animate-appear" style={{ animationDelay: "0.1s" }}>
             {gameList.map((game) => {
               const Icon = game.icon;
               return (
                 <Card
                   key={game.id}
-                  className="bg-white/80 backdrop-blur-sm hover:shadow-lg transition-all cursor-pointer group hover:scale-[1.02]"
+                  className="game-card bg-white/70 backdrop-blur-md border-white/60 cursor-pointer group overflow-hidden"
                   onClick={() => navigate(`/game/${game.id}/create`)}
                 >
+                  <div className={`h-1.5 ${game.color}`} />
                   <CardHeader className="pb-3">
-                    <div className={`w-12 h-12 rounded-lg ${game.color} flex items-center justify-center mb-2 group-hover:scale-110 transition-transform`}>
+                    <div className={`w-12 h-12 rounded-xl ${game.color} shadow-md flex items-center justify-center mb-2 group-hover:scale-110 group-hover:rotate-3 transition-transform`}>
                       <Icon className="h-6 w-6 text-white" />
                     </div>
                     <CardTitle className="text-lg">{game.name}</CardTitle>
@@ -82,7 +85,11 @@ const Home: React.FC = () => {
                     </CardDescription>
                     <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
                       <Users className="h-3 w-3" />
-                      <span>{game.minPlayers}-{game.maxPlayers} players</span>
+                      <span>
+                        {game.minPlayers === game.maxPlayers
+                          ? `${game.maxPlayers} players`
+                          : `${game.minPlayers}-${game.maxPlayers} players`}
+                      </span>
                     </div>
                   </CardContent>
                 </Card>
@@ -91,7 +98,7 @@ const Home: React.FC = () => {
           </div>
 
           {/* Join Existing Room */}
-          <Card className="w-full max-w-md animate-appear" style={{ animationDelay: "0.2s" }}>
+          <Card className="w-full max-w-md animate-appear bg-white/70 backdrop-blur-md border-white/60 shadow-lg" style={{ animationDelay: "0.2s" }}>
             <CardHeader>
               <CardTitle className="text-lg">Join an Existing Room</CardTitle>
               <CardDescription>Enter a room code to join a game in progress</CardDescription>
