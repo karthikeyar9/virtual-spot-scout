@@ -110,10 +110,10 @@ export const useLobby = (roomId: string | undefined, gameType: string) => {
   }, [socket, isConnected, roomId, playerId]);
 
   // Start game
-  const startGame = useCallback((rounds: number) => {
+  const startGame = useCallback((rounds: number, options?: { vsComputer?: boolean; difficulty?: string }) => {
     if (!socket || !isConnected || !roomId) return;
-    console.log('🎮 startGame:', { roomId, rounds, gameType });
-    socket.emit('startGame', { roomId, rounds, gameType });
+    console.log('🎮 startGame:', { roomId, rounds, gameType, ...options });
+    socket.emit('startGame', { roomId, rounds, gameType, ...options });
   }, [socket, isConnected, roomId, gameType]);
 
   // Leave game

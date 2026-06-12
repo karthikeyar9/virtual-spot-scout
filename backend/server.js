@@ -170,7 +170,7 @@ io.on('connection', (socket) => {
   });
 
   // Start game
-  socket.on('startGame', ({ roomId, rounds = 5, gameType }) => {
+  socket.on('startGame', ({ roomId, rounds = 5, gameType, vsComputer, difficulty }) => {
     if (!rooms[roomId]) return;
 
     const allPlayersReady = rooms[roomId].players.every(player =>
@@ -182,8 +182,11 @@ io.on('connection', (socket) => {
       return;
     }
 
+    rooms[roomId].vsComputer = !!vsComputer;
+    rooms[roomId].difficulty = difficulty;
+
     const pendingHandler = getGameHandler(gameType || rooms[roomId].gameType);
-    if (pendingHandler && pendingHandler.minPlayers && rooms[roomId].players.length < pendingHandler.minPlayers) {
+    if (!vsComputer && pendingHandler && pendingHandler.minPlayers && rooms[roomId].players.length < pendingHandler.minPlayers) {
       socket.emit('errorMessage', { message: `This game needs at least ${pendingHandler.minPlayers} players` });
       return;
     }
@@ -267,7 +270,8 @@ io.on('connection', (socket) => {
               if (pIdx !== -1 && rooms[roomId].players[pIdx].disconnected) {
                 rooms[roomId].players.splice(pIdx, 1);
                 console.log(`🗑️ Player ${playerName} removed after disconnect timeout`);
-                if (rooms[roomId].players.length === 0) {
+                // Bots don't keep a room alive
+                if (rooms[roomId].players.every(p => p.isBot)) {
                   delete rooms[roomId];
                   console.log('🗑️ Room deleted (empty):', roomId);
                 } else {
@@ -287,13 +291,15 @@ io.on('connection', (socket) => {
         // Game hasn't started - remove player immediately
         rooms[roomId].players = rooms[roomId].players.filter(p => p.id !== playerId);
 
-        if (rooms[roomId].players.length === 0) {
+        // Bots don't keep a room alive
+        const humans = rooms[roomId].players.filter(p => !p.isBot);
+        if (humans.length === 0) {
           delete rooms[roomId];
           console.log('🗑️ Room deleted (empty):', roomId);
         } else {
-          const hasHost = rooms[roomId].players.some(p => p.isHost);
-          if (!hasHost && rooms[roomId].players.length > 0) {
-            rooms[roomId].players[0].isHost = true;
+          const hasHost = humans.some(p => p.isHost);
+          if (!hasHost) {
+            humans[0].isHost = true;
           }
           io.to(roomId).emit('playersUpdated', { players: rooms[roomId].players });
         }

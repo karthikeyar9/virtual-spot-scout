@@ -23,6 +23,7 @@ interface GameLobbyProps {
   onStartGame: () => void;
   onToggleReady: () => void;
   gameName?: string;
+  vsComputer?: boolean;
 }
 
 const GameLobby = ({
@@ -33,7 +34,8 @@ const GameLobby = ({
   currentPlayer,
   onStartGame,
   onToggleReady,
-  gameName
+  gameName,
+  vsComputer
 }: GameLobbyProps) => {
   const { toast } = useToast();
   const [isCopied, setIsCopied] = useState(false);
@@ -50,7 +52,8 @@ const GameLobby = ({
     setTimeout(() => setIsCopied(false), 2000);
   };
 
-  const minPlayers = getGame(gameType)?.minPlayers ?? 1;
+  // A computer opponent fills the second seat, so one human is enough
+  const minPlayers = vsComputer ? 1 : getGame(gameType)?.minPlayers ?? 1;
   const allPlayersReady = players.length > 0 && players.every(player => player.isReady);
   const hasEnoughPlayers = players.length >= minPlayers;
   const canStartGame = allPlayersReady && hasEnoughPlayers;

@@ -41,7 +41,7 @@ To add a new game, create a component directory under `src/games/<id>/` implemen
 
 Handlers can optionally export `getGameData(room)` (game-specific payload sent with `gameStarted`/`roomState` for joins and mid-game rejoins), `onNextRound(room)` (called by the shared `nextRound` event), and `minPlayers` (enforced server-side in `startGame`).
 
-Current games: `city-guesser`, `trivia`, `hot-takes`, `emoji-decoder`, and `chess` (server-authoritative via chess.js; 2 players, host plays white).
+Current games: `city-guesser`, `trivia`, `hot-takes`, `emoji-decoder`, and `chess` (server-authoritative via chess.js; 2 players, host plays white). Chess also supports a computer opponent: the create page's `opponent` config field flows through `startGame` as `vsComputer`/`difficulty`, the handler seats a bot player (`id: 'bot'`), and `backend/games/chess-ai.js` (time-budgeted minimax) picks its moves.
 
 ### Question Database
 

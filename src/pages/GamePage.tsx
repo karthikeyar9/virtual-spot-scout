@@ -49,6 +49,9 @@ const GamePage: React.FC = () => {
   const rounds = parseInt(searchParams.get("rounds") || "5");
   const timeLimit = parseInt(searchParams.get("time") || "60");
   const urlPlayerId = searchParams.get("playerId");
+  const opponent = searchParams.get("opponent") || "friend";
+  const vsComputer = opponent.startsWith("computer");
+  const difficulty = vsComputer ? opponent.replace("computer-", "") : undefined;
 
   // Show connection error
   useEffect(() => {
@@ -103,8 +106,8 @@ const GamePage: React.FC = () => {
 
   // Handle start game
   const handleStartGame = useCallback(() => {
-    lobbyStartGame(rounds);
-  }, [lobbyStartGame, rounds]);
+    lobbyStartGame(rounds, vsComputer ? { vsComputer, difficulty } : undefined);
+  }, [lobbyStartGame, rounds, vsComputer, difficulty]);
 
   // Handle game complete (return to lobby)
   const handleGameComplete = useCallback(() => {
@@ -180,6 +183,7 @@ const GamePage: React.FC = () => {
         onStartGame={handleStartGame}
         onToggleReady={handleToggleReady}
         gameName={game.name}
+        vsComputer={vsComputer}
       />
     );
   }

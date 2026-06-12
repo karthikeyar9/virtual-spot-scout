@@ -142,7 +142,20 @@ export const games: Record<string, GameDefinition> = {
     minPlayers: 2,
     maxPlayers: 2,
     component: lazy(() => import('./chess/ChessGame')),
-    configFields: [],
+    configFields: [
+      {
+        key: 'opponent',
+        label: 'Opponent',
+        type: 'select',
+        options: [
+          { value: 'friend', label: 'Play a Friend' },
+          { value: 'computer-easy', label: 'Computer — Easy' },
+          { value: 'computer-medium', label: 'Computer — Medium' },
+          { value: 'computer-hard', label: 'Computer — Hard' },
+        ],
+        defaultValue: 'friend',
+      },
+    ],
   },
 };
 

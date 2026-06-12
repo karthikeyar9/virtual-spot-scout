@@ -7,6 +7,7 @@ export interface Player {
   score: number;
   isHost: boolean;
   isReady: boolean;
+  isBot?: boolean;
   roundScore?: number;
   distanceToTarget?: number;
   guessLocation?: { lat: number; lng: number };

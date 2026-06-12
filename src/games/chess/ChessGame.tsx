@@ -10,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useSocket } from "@/hooks/useSocket";
 import { cn } from "@/lib/utils";
 import { GameComponentProps } from "@/games/types";
-import { Flag, Handshake, Crown, Eye } from "lucide-react";
+import { Flag, Handshake, Crown, Eye, Bot } from "lucide-react";
 
 interface ChessState {
   fen: string;
@@ -163,8 +163,11 @@ const ChessGame: React.FC<GameComponentProps> = ({
     return "";
   })();
 
+  const opponentIsBot = players.some(p => p.isBot);
+
   const seatBadge = (color: 'w' | 'b') => {
     const id = color === 'w' ? state.whiteId : state.blackId;
+    const isBot = players.find(p => p.id === id)?.isBot;
     const active = state.status === 'active' && state.turn === color;
     return (
       <div className={cn(
@@ -175,9 +178,10 @@ const ChessGame: React.FC<GameComponentProps> = ({
           "inline-block w-3 h-3 rounded-full border",
           color === 'w' ? "bg-white border-gray-400" : "bg-gray-900 border-gray-900"
         )} />
+        {isBot && <Bot className="h-4 w-4 text-muted-foreground" />}
         <span className="font-medium">{playerName(id)}</span>
         {id === playerId && <Badge variant="outline" className="text-xs">You</Badge>}
-        {active && <span className="text-xs text-primary font-semibold">to move</span>}
+        {active && <span className="text-xs text-primary font-semibold">{isBot ? "thinking..." : "to move"}</span>}
       </div>
     );
   };
@@ -297,11 +301,13 @@ const ChessGame: React.FC<GameComponentProps> = ({
 
           {state.status === 'active' && myColor && (
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="flex-1" onClick={handleOfferDraw}
-                disabled={state.drawOfferBy === playerId}>
-                <Handshake className="h-4 w-4 mr-1" />
-                {state.drawOfferBy === playerId ? "Offered" : "Draw"}
-              </Button>
+              {!opponentIsBot && (
+                <Button variant="outline" size="sm" className="flex-1" onClick={handleOfferDraw}
+                  disabled={state.drawOfferBy === playerId}>
+                  <Handshake className="h-4 w-4 mr-1" />
+                  {state.drawOfferBy === playerId ? "Offered" : "Draw"}
+                </Button>
+              )}
               <Button variant="destructive" size="sm" className="flex-1" onClick={handleResign}>
                 <Flag className="h-4 w-4 mr-1" /> Resign
               </Button>
