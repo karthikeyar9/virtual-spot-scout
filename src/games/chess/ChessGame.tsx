@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { Chess, Square } from "chess.js";
+import { Chessboard } from "react-chessboard";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,18 +21,32 @@ interface ChessState {
   moves: string[];
   lastMove: { from: string; to: string } | null;
   status: 'active' | 'checkmate' | 'draw' | 'resigned';
+  drawReason?: string | null;
   winnerId: string | null;
   check: boolean;
   drawOfferBy: string | null;
 }
 
-// ︎ forces text presentation — without it Chrome renders ♟ as an emoji
-// and ignores the CSS color used to distinguish white from black pieces.
-const PIECE_GLYPHS: Record<string, string> = {
-  k: "♚︎", q: "♛︎", r: "♜︎", b: "♝︎", n: "♞︎", p: "♟︎",
-};
+type PromotionPiece = 'q' | 'r' | 'b' | 'n';
 
-const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
+const PIECE_VALUES: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+const START_COUNTS: Record<string, number> = { p: 8, n: 2, b: 2, r: 2, q: 1 };
+// Small text glyphs for the captured-pieces strip only (the board uses SVG pieces).
+const CAPTURE_GLYPHS: Record<string, string> = { q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+
+const LAST_MOVE_STYLE: React.CSSProperties = { backgroundColor: "rgba(250, 204, 21, 0.45)" };
+const SELECTED_STYLE: React.CSSProperties = { backgroundColor: "rgba(16, 185, 129, 0.5)" };
+const TARGET_STYLE: React.CSSProperties = {
+  backgroundImage: "radial-gradient(circle, rgba(16,185,129,0.75) 22%, transparent 24%)",
+  cursor: "pointer",
+};
+const CAPTURE_TARGET_STYLE: React.CSSProperties = {
+  backgroundImage: "radial-gradient(circle, transparent 62%, rgba(16,185,129,0.75) 64%)",
+  cursor: "pointer",
+};
+const CHECK_STYLE: React.CSSProperties = {
+  backgroundImage: "radial-gradient(circle, rgba(239,68,68,0.9) 0%, rgba(239,68,68,0.45) 45%, transparent 75%)",
+};
 
 const ChessGame: React.FC<GameComponentProps> = ({
   roomId,
@@ -48,6 +63,7 @@ const ChessGame: React.FC<GameComponentProps> = ({
   const [selected, setSelected] = useState<Square | null>(null);
   const [legalTargets, setLegalTargets] = useState<Square[]>([]);
   const [showGameOver, setShowGameOver] = useState(false);
+  const [pendingPromotion, setPendingPromotion] = useState<{ from: Square; to: Square } | null>(null);
 
   const chess = useMemo(() => (state ? new Chess(state.fen) : null), [state]);
 
@@ -75,6 +91,7 @@ const ChessGame: React.FC<GameComponentProps> = ({
       setState(next);
       setSelected(null);
       setLegalTargets([]);
+      setPendingPromotion(null);
     };
 
     const handleGameOver = ({ players: finalPlayers }: { players: GameComponentProps['players'] }) => {
@@ -86,6 +103,8 @@ const ChessGame: React.FC<GameComponentProps> = ({
       toast({ title: "Invalid move", variant: "destructive" });
       setSelected(null);
       setLegalTargets([]);
+      // Roll back the optimistic board update
+      socket.emit('chess:requestState', { roomId });
     };
 
     socket.on('chess:state', handleState);
@@ -99,33 +118,123 @@ const ChessGame: React.FC<GameComponentProps> = ({
     };
   }, [socket, isConnected, roomId, setPlayers, toast]);
 
-  const handleSquareClick = useCallback((square: Square) => {
-    if (!chess || !state || state.status !== 'active' || !isMyTurn || !socket) return;
+  const clearSelection = useCallback(() => {
+    setSelected(null);
+    setLegalTargets([]);
+  }, []);
 
-    // Complete a move if the square is a legal target of the selection
+  // Sends a move and applies it locally right away so the piece doesn't snap
+  // back while waiting for the server's authoritative state.
+  const sendMove = useCallback((from: Square, to: Square, promotion: PromotionPiece = 'q') => {
+    if (!state || !socket) return false;
+    const game = new Chess(state.fen);
+    let san: string;
+    try {
+      san = game.move({ from, to, promotion }).san;
+    } catch {
+      return false;
+    }
+    setState({
+      ...state,
+      fen: game.fen(),
+      turn: game.turn(),
+      lastMove: { from, to },
+      moves: [...state.moves, san],
+      check: game.inCheck(),
+      drawOfferBy: null,
+    });
+    socket.emit('chess:move', { roomId, playerId, from, to, promotion });
+    clearSelection();
+    return true;
+  }, [state, socket, roomId, playerId, clearSelection]);
+
+  // Returns true if the move was played; promotions open the piece picker instead.
+  const tryMove = useCallback((from: Square, to: Square) => {
+    if (!chess || !isMyTurn) return false;
+    const move = chess.moves({ square: from, verbose: true }).find(m => m.to === to);
+    if (!move) return false;
+    if (move.promotion) {
+      setPendingPromotion({ from, to });
+      clearSelection();
+      return false;
+    }
+    return sendMove(from, to);
+  }, [chess, isMyTurn, sendMove, clearSelection]);
+
+  const selectSquare = useCallback((square: Square) => {
+    if (!chess) return;
+    setSelected(square);
+    setLegalTargets(chess.moves({ square, verbose: true }).map(m => m.to as Square));
+  }, [chess]);
+
+  const handleSquareClick = useCallback((square: Square) => {
+    if (!chess || !isMyTurn) return;
+    setPendingPromotion(null);
+
     if (selected && legalTargets.includes(square)) {
-      socket.emit('chess:move', {
-        roomId,
-        playerId,
-        from: selected,
-        to: square,
-        promotion: 'q', // auto-queen
-      });
-      setSelected(null);
-      setLegalTargets([]);
+      tryMove(selected, square);
       return;
     }
 
     // Otherwise (re)select one of my pieces
     const piece = chess.get(square);
-    if (piece && piece.color === myColor) {
-      setSelected(square);
-      setLegalTargets(chess.moves({ square, verbose: true }).map(m => m.to as Square));
+    if (piece && piece.color === myColor && square !== selected) {
+      selectSquare(square);
     } else {
-      setSelected(null);
-      setLegalTargets([]);
+      clearSelection();
     }
-  }, [chess, state, isMyTurn, socket, selected, legalTargets, roomId, playerId, myColor]);
+  }, [chess, isMyTurn, selected, legalTargets, myColor, tryMove, selectSquare, clearSelection]);
+
+  const handlePromotionSelect = useCallback((piece?: string) => {
+    if (piece && pendingPromotion) {
+      sendMove(pendingPromotion.from, pendingPromotion.to, piece[1].toLowerCase() as PromotionPiece);
+    }
+    setPendingPromotion(null);
+    return false; // we already applied the move ourselves
+  }, [pendingPromotion, sendMove]);
+
+  const squareStyles = useMemo(() => {
+    const styles: Record<string, React.CSSProperties> = {};
+    if (!state || !chess) return styles;
+    if (state.lastMove) {
+      styles[state.lastMove.from] = LAST_MOVE_STYLE;
+      styles[state.lastMove.to] = LAST_MOVE_STYLE;
+    }
+    if (state.check && state.status === 'active') {
+      for (const row of chess.board()) {
+        for (const cell of row) {
+          if (cell && cell.type === 'k' && cell.color === state.turn) {
+            styles[cell.square] = CHECK_STYLE;
+          }
+        }
+      }
+    }
+    if (selected) styles[selected] = SELECTED_STYLE;
+    for (const target of legalTargets) {
+      styles[target] = { ...styles[target], ...(chess.get(target) ? CAPTURE_TARGET_STYLE : TARGET_STYLE) };
+    }
+    return styles;
+  }, [state, chess, selected, legalTargets]);
+
+  // Pieces each side has lost, plus the material balance from white's view
+  const material = useMemo(() => {
+    const counts: Record<'w' | 'b', Record<string, number>> = { w: {}, b: {} };
+    let balance = 0;
+    if (chess) {
+      for (const row of chess.board()) {
+        for (const cell of row) {
+          if (!cell) continue;
+          counts[cell.color][cell.type] = (counts[cell.color][cell.type] || 0) + 1;
+          balance += PIECE_VALUES[cell.type] * (cell.color === 'w' ? 1 : -1);
+        }
+      }
+    }
+    const lost = (color: 'w' | 'b') =>
+      Object.keys(START_COUNTS)
+        .map(type => CAPTURE_GLYPHS[type].repeat(Math.max(0, START_COUNTS[type] - (counts[color][type] || 0))))
+        .join("");
+    return { lostWhite: lost('w'), lostBlack: lost('b'), balance };
+  }, [chess]);
 
   const handleResign = useCallback(() => {
     socket?.emit('chess:resign', { roomId, playerId });
@@ -153,13 +262,10 @@ const ChessGame: React.FC<GameComponentProps> = ({
     );
   }
 
-  const board = chess.board(); // ranks 8 → 1
-  const ranks = flipped ? [...board].reverse() : board;
-
   const resultText = (() => {
     if (state.status === 'checkmate') return `Checkmate — ${playerName(state.winnerId)} wins!`;
     if (state.status === 'resigned') return `${playerName(state.winnerId)} wins by resignation`;
-    if (state.status === 'draw') return "Draw";
+    if (state.status === 'draw') return state.drawReason ? `Draw by ${state.drawReason}` : "Draw";
     return "";
   })();
 
@@ -169,6 +275,7 @@ const ChessGame: React.FC<GameComponentProps> = ({
     const id = color === 'w' ? state.whiteId : state.blackId;
     const isBot = players.find(p => p.id === id)?.isBot;
     const active = state.status === 'active' && state.turn === color;
+    const advantage = color === 'w' ? material.balance : -material.balance;
     return (
       <div className={cn(
         "flex items-center gap-2 px-3 py-2 rounded-lg border transition-all",
@@ -182,74 +289,41 @@ const ChessGame: React.FC<GameComponentProps> = ({
         <span className="font-medium">{playerName(id)}</span>
         {id === playerId && <Badge variant="outline" className="text-xs">You</Badge>}
         {active && <span className="text-xs text-primary font-semibold">{isBot ? "thinking..." : "to move"}</span>}
+        <span className="ml-auto flex items-center gap-1 text-sm text-muted-foreground leading-none">
+          <span className="tracking-tighter">{color === 'w' ? material.lostBlack : material.lostWhite}</span>
+          {advantage > 0 && <span className="text-xs font-semibold">+{advantage}</span>}
+        </span>
       </div>
     );
   };
 
   return (
     <div className="container mx-auto p-4 flex flex-col lg:flex-row gap-6 flex-1 items-start justify-center">
-      <div className="flex flex-col gap-3 w-full max-w-[560px] mx-auto lg:mx-0">
+      <div className="flex flex-col gap-3 w-full mx-auto lg:mx-0" style={{ maxWidth: "min(560px, calc(100dvh - 200px))", minWidth: "min(100%, 280px)" }}>
         {/* Opponent seat (top) */}
         {seatBadge(flipped ? 'w' : 'b')}
 
         {/* Board */}
-        <div className="relative rounded-xl overflow-hidden shadow-xl border border-black/10 select-none">
-          {ranks.map((row, r) => {
-            const cells = flipped ? [...row].reverse() : row;
-            return (
-              <div key={r} className="grid grid-cols-8">
-                {cells.map((cell, c) => {
-                  const file = flipped ? 7 - c : c;
-                  const rank = flipped ? r + 1 : 8 - r;
-                  const square = `${FILES[file]}${rank}` as Square;
-                  const isDark = (file + rank) % 2 === 0;
-                  const isSelected = selected === square;
-                  const isTarget = legalTargets.includes(square);
-                  const isLastMove = state.lastMove?.from === square || state.lastMove?.to === square;
-
-                  return (
-                    <button
-                      key={square}
-                      aria-label={square}
-                      onClick={() => handleSquareClick(square)}
-                      className={cn(
-                        "relative aspect-square flex items-center justify-center text-4xl sm:text-5xl leading-none",
-                        isDark ? "bg-[#b58863]" : "bg-[#f0d9b5]",
-                        isLastMove && "after:absolute after:inset-0 after:bg-yellow-400/30",
-                        isSelected && "after:absolute after:inset-0 after:bg-emerald-500/40",
-                        isMyTurn && "cursor-pointer"
-                      )}
-                    >
-                      {cell && (
-                        <span
-                          className={cn(
-                            "relative z-10 drop-shadow",
-                            cell.color === 'w' ? "text-white" : "text-gray-900"
-                          )}
-                          style={{ textShadow: cell.color === 'w' ? "0 0 2px rgba(0,0,0,0.7)" : "0 0 2px rgba(255,255,255,0.3)" }}
-                        >
-                          {PIECE_GLYPHS[cell.type]}
-                        </span>
-                      )}
-                      {isTarget && (
-                        <span className={cn(
-                          "absolute z-20 rounded-full",
-                          cell ? "inset-1 border-4 border-emerald-500/70" : "w-1/4 h-1/4 bg-emerald-500/70"
-                        )} />
-                      )}
-                      {/* Coordinates */}
-                      {c === 0 && (
-                        <span className="absolute left-0.5 top-0.5 text-[10px] font-bold opacity-50 z-10">{rank}</span>
-                      )}
-                      {r === 7 && (
-                        <span className="absolute right-0.5 bottom-0 text-[10px] font-bold opacity-50 z-10">{FILES[file]}</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            );
-          })}
+        <div className="rounded-xl overflow-hidden shadow-xl border border-black/10 select-none touch-none">
+          <Chessboard
+            id="chess-board"
+            position={state.fen}
+            boardOrientation={flipped ? "black" : "white"}
+            animationDuration={200}
+            arePiecesDraggable={isMyTurn}
+            isDraggablePiece={({ piece }) => isMyTurn && piece[0] === myColor}
+            onPieceDragBegin={(_piece, square) => selectSquare(square as Square)}
+            onPieceDragEnd={clearSelection}
+            onPieceDrop={(from, to) => tryMove(from as Square, to as Square)}
+            onSquareClick={(square) => handleSquareClick(square as Square)}
+            onPromotionCheck={() => false}
+            showPromotionDialog={!!pendingPromotion}
+            promotionToSquare={pendingPromotion?.to ?? null}
+            onPromotionPieceSelect={handlePromotionSelect}
+            customSquareStyles={squareStyles}
+            customDarkSquareStyle={{ backgroundColor: "#b58863" }}
+            customLightSquareStyle={{ backgroundColor: "#f0d9b5" }}
+          />
         </div>
 
         {/* My seat (bottom) */}
@@ -314,7 +388,7 @@ const ChessGame: React.FC<GameComponentProps> = ({
             </div>
           )}
 
-          <p className="text-xs text-muted-foreground">Pawns promote to queens automatically.</p>
+          <p className="text-xs text-muted-foreground">Drag a piece or tap it, then tap a highlighted square.</p>
         </CardContent>
       </Card>
 

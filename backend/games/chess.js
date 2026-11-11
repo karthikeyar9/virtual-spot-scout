@@ -11,6 +11,14 @@ const DRAW_SCORE = 500;
 const BOT_ID = 'bot';
 const BOT_NAMES = { easy: 'Computer (Easy)', medium: 'Computer (Medium)', hard: 'Computer (Hard)' };
 const BOT_MOVE_DELAY_MS = 700;
+const PROMOTION_PIECES = ['q', 'r', 'b', 'n'];
+
+// Repetition key: piece placement, side to move, castling rights, en passant.
+// State is stored as a FEN (which carries no history), so chess.js alone
+// can't detect threefold repetition — we count positions ourselves.
+function positionKey(fen) {
+  return fen.split(' ').slice(0, 4).join(' ');
+}
 
 function statePayload(room) {
   const gs = room.gameState;
@@ -23,6 +31,7 @@ function statePayload(room) {
     moves: gs.moves,
     lastMove: gs.lastMove,
     status: gs.status, // 'active' | 'checkmate' | 'draw' | 'resigned'
+    drawReason: gs.drawReason || null,
     winnerId: gs.winnerId,
     check: gs.status === 'active' && game.inCheck(),
     drawOfferBy: gs.drawOfferBy,
@@ -49,8 +58,11 @@ function onStart(room) {
     ? room.players.find(p => p.id === BOT_ID)
     : humans.find(p => p !== host) || null;
 
+  const startFen = new Chess().fen();
   room.gameState = {
-    fen: new Chess().fen(),
+    fen: startFen,
+    positionCounts: { [positionKey(startFen)]: 1 },
+    drawReason: null,
     whiteId: host ? host.id : null,
     blackId: opponent ? opponent.id : null,
     moves: [],
@@ -80,9 +92,10 @@ function awardScores(room, winnerId) {
   });
 }
 
-function finishGame(io, roomId, room, status, winnerId) {
+function finishGame(io, roomId, room, status, winnerId, drawReason = null) {
   const gs = room.gameState;
   gs.status = status;
+  gs.drawReason = drawReason;
   gs.winnerId = winnerId;
   gs.drawOfferBy = null;
   awardScores(room, winnerId);
@@ -100,9 +113,11 @@ function applyMove(io, roomId, room, playerId, { from, to, promotion }) {
   const gs = room.gameState;
   const game = new Chess(gs.fen);
 
+  if (typeof from !== 'string' || typeof to !== 'string') return false;
+
   let move;
   try {
-    move = game.move({ from, to, promotion: promotion || 'q' });
+    move = game.move({ from, to, promotion: PROMOTION_PIECES.includes(promotion) ? promotion : 'q' });
   } catch (e) {
     return false;
   }
@@ -112,10 +127,20 @@ function applyMove(io, roomId, room, playerId, { from, to, promotion }) {
   gs.lastMove = { from: move.from, to: move.to };
   gs.drawOfferBy = null; // any move cancels a pending draw offer
 
+  const key = positionKey(gs.fen);
+  gs.positionCounts = gs.positionCounts || {};
+  gs.positionCounts[key] = (gs.positionCounts[key] || 0) + 1;
+
   if (game.isCheckmate()) {
     finishGame(io, roomId, room, 'checkmate', playerId);
-  } else if (game.isDraw() || game.isStalemate()) {
-    finishGame(io, roomId, room, 'draw', null);
+  } else if (game.isStalemate()) {
+    finishGame(io, roomId, room, 'draw', null, 'stalemate');
+  } else if (game.isInsufficientMaterial()) {
+    finishGame(io, roomId, room, 'draw', null, 'insufficient material');
+  } else if (gs.positionCounts[key] >= 3) {
+    finishGame(io, roomId, room, 'draw', null, 'threefold repetition');
+  } else if (game.isDraw()) {
+    finishGame(io, roomId, room, 'draw', null, 'fifty-move rule');
   } else {
     io.to(roomId).emit('chess:state', statePayload(room));
   }
@@ -202,7 +227,7 @@ function registerEvents(socket, io, rooms) {
     if (!gs.drawOfferBy || gs.drawOfferBy === playerId) return;
 
     if (accept) {
-      finishGame(io, roomId, room, 'draw', null);
+      finishGame(io, roomId, room, 'draw', null, 'agreement');
     } else {
       gs.drawOfferBy = null;
       io.to(roomId).emit('chess:state', statePayload(room));
