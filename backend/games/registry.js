@@ -3,6 +3,7 @@ const trivia = require('./trivia');
 const hotTakes = require('./hot-takes');
 const emojiDecoder = require('./emoji-decoder');
 const chess = require('./chess');
+const autoRush = require('./auto-rush');
 
 const gameHandlers = {
   'city-guesser': cityGuesser,
@@ -10,6 +11,7 @@ const gameHandlers = {
   'hot-takes': hotTakes,
   'emoji-decoder': emojiDecoder,
   'chess': chess,
+  'auto-rush': autoRush,
 };
 
 function getGameHandler(gameType) {

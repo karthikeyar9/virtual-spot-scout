@@ -41,7 +41,9 @@ To add a new game, create a component directory under `src/games/<id>/` implemen
 
 Handlers can optionally export `getGameData(room)` (game-specific payload sent with `gameStarted`/`roomState` for joins and mid-game rejoins), `onNextRound(room)` (called by the shared `nextRound` event), and `minPlayers` (enforced server-side in `startGame`).
 
-Current games: `city-guesser`, `trivia`, `hot-takes`, `emoji-decoder`, and `chess` (server-authoritative via chess.js; 2 players, host plays white). Chess also supports a computer opponent: the create page's `opponent` config field flows through `startGame` as `vsComputer`/`difficulty`, the handler seats a bot player (`id: 'bot'`), and `backend/games/chess-ai.js` (time-budgeted minimax) picks its moves.
+Current games: `city-guesser`, `trivia`, `hot-takes`, `emoji-decoder`, `auto-rush`, and `chess` (server-authoritative via chess.js; 2 players, host plays white). Chess also supports a computer opponent: the create page's `opponent` config field flows through `startGame` as `vsComputer`/`difficulty`, the handler seats a bot player (`id: 'bot'`), and `backend/games/chess-ai.js` (time-budgeted minimax) picks its moves.
+
+Auto Rush (`auto-rush`) is a real-time top-down driving game drawn on a canvas. Each client simulates its own auto and reports its position (`auto-rush:pos`, ~12 Hz); the server owns passengers, fares, steals, chai boosts and the clock, and broadcasts a snapshot every 100 ms from a per-room ticker. The map (roads, landmark blocks, stops, bus routes) is generated in `backend/games/auto-rush.js` and sent to clients, so it has a single source of truth. Match length reuses the shared `rounds` setting as minutes.
 
 ### Question Database
 
