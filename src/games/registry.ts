@@ -1,5 +1,5 @@
 import { lazy } from 'react';
-import { Globe, HelpCircle, ThumbsUp, Smile, Crown } from 'lucide-react';
+import { Globe, HelpCircle, ThumbsUp, Smile, Crown, CarTaxiFront } from 'lucide-react';
 import { GameDefinition } from './types';
 
 export const games: Record<string, GameDefinition> = {
@@ -154,6 +154,30 @@ export const games: Record<string, GameDefinition> = {
           { value: 'computer-hard', label: 'Computer — Hard' },
         ],
         defaultValue: 'friend',
+      },
+    ],
+  },
+  'auto-rush': {
+    id: 'auto-rush',
+    name: 'Auto Rush: Hyderabad',
+    description: 'Drive an auto-rickshaw across Hyderabad. Grab passengers, dodge buses, and steal fares from your friends!',
+    icon: CarTaxiFront,
+    color: 'bg-gradient-to-br from-amber-400 to-orange-600',
+    minPlayers: 1,
+    maxPlayers: 8,
+    component: lazy(() => import('./auto-rush/AutoRushGame')),
+    configFields: [
+      {
+        // Match length rides on the shared `rounds` setting, in minutes
+        key: 'rounds',
+        label: 'Match Length',
+        type: 'select',
+        options: [
+          { value: '2', label: '2 Minutes' },
+          { value: '3', label: '3 Minutes' },
+          { value: '5', label: '5 Minutes' },
+        ],
+        defaultValue: '3',
       },
     ],
   },
