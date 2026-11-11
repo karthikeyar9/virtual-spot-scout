@@ -85,17 +85,14 @@ io.on('connection', (socket) => {
         gameData: rooms[roomId].hasStarted ? buildGameData(rooms[roomId]) : undefined,
       });
     } else {
-      rooms[roomId] = {
+      // Unknown room: answer with defaults but don't create it — joinRoom does
+      // that. Storing it here leaked a permanent empty room per lookup.
+      socket.emit('roomState', {
         gameType: 'city-guesser',
         hasStarted: false,
         players: [],
         currentRound: 0,
         totalRounds: 5,
-        gameState: {},
-      };
-      socket.emit('roomState', {
-        ...rooms[roomId],
-        gameType: rooms[roomId].gameType,
       });
     }
   });
