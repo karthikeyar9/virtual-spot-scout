@@ -50,21 +50,28 @@ function buildMap() {
     }
   }
 
-  // Buses shuttle back and forth along the middle of the inner roads.
+  // Traffic shuttles back and forth along the roads, keeping to its own lane
+  // (left-hand traffic), so the middle of the road is usually clear. Clients
+  // derive positions from the server clock; the server only defines routes.
   const minX = (ROAD_COLS[0] + 1) * TILE;
   const maxX = (ROAD_COLS[ROAD_COLS.length - 1] + 1) * TILE;
   const minY = (ROAD_ROWS[0] + 1) * TILE;
   const maxY = (ROAD_ROWS[ROAD_ROWS.length - 1] + 1) * TILE;
-  const buses = [
-    ...[1, 2, 3].map((r, n) => ({ axis: 'h', fixed: (ROAD_ROWS[r] + 1) * TILE, min: minX, max: maxX, speed: 120 + n * 25, phase: n * 700 })),
-    ...[1, 2, 3, 4].map((c, n) => ({ axis: 'v', fixed: (ROAD_COLS[c] + 1) * TILE, min: minY, max: maxY, speed: 110 + n * 20, phase: n * 450 })),
-  ];
+  const lane = TILE / 2;
+  const along = (axis, line, speed, phase) => axis === 'h'
+    ? { axis, fixed: (ROAD_ROWS[line] + 1) * TILE, min: minX, max: maxX, speed, phase, lane }
+    : { axis, fixed: (ROAD_COLS[line] + 1) * TILE, min: minY, max: maxY, speed, phase, lane };
+  const buses = [along('h', 2, 115, 0), along('v', 2, 105, 900), along('v', 4, 120, 300)];
+  const cars = [
+    along('h', 0, 170, 200), along('h', 1, 150, 1500), along('h', 3, 185, 700), along('h', 4, 160, 2600),
+    along('v', 0, 175, 400), along('v', 1, 155, 1900), along('v', 3, 190, 1100), along('v', 5, 165, 50),
+  ].map((car, i) => ({ ...car, style: i % 2 }));
 
   return {
     tile: TILE, cols: COLS, rows: ROWS, roadTiles: ROAD_TILES,
     roadCols: ROAD_COLS, roadRows: ROAD_ROWS,
     width: COLS * TILE, height: ROWS * TILE,
-    blocks, stops, buses,
+    blocks, stops, buses, cars,
   };
 }
 
@@ -259,6 +266,17 @@ function registerEvents(socket, io, rooms) {
     }
     socket.emit('auto-rush:init', initPayload(room));
     if (gs.status === 'active') ensureTicker(io, rooms, roomId);
+  });
+
+  // Horns are heard by everyone nearby; the client fades them by distance
+  socket.on('auto-rush:horn', ({ roomId, playerId }) => {
+    const room = rooms[roomId];
+    if (!isAutoRush(room) || room.gameState.status !== 'active') return;
+    const car = room.gameState.cars[playerId];
+    const now = Date.now();
+    if (!car || now - (car.lastHorn || 0) < 400) return;
+    car.lastHorn = now;
+    socket.to(roomId).emit('auto-rush:horn', { by: playerId });
   });
 
   socket.on('auto-rush:pos', ({ roomId, playerId, x, y, a, s }) => {
