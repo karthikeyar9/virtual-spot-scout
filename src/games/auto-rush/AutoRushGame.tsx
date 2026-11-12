@@ -11,7 +11,7 @@ import { GameAudio } from "./audio";
 import { RushScene } from "./scene";
 import {
   BOOST_SPEED, GameEvent, GameMap, InitPayload, KMH_PER_UNIT, LocalCar, MAX_SPEED, Snapshot,
-  busPosition, clamp, colorFor, stepCar,
+  Point, busPosition, clamp, colorFor, routeLength, routeTo, stepCar,
 } from "./shared";
 
 const SEND_INTERVAL_MS = 80;
@@ -30,6 +30,7 @@ interface Hud {
   timeLeft: number;
   rush: boolean;
   status: string;
+  distance: number | null; // metres left on the GPS route
   loaded: boolean;
   kmh: number;
   boosted: boolean;
@@ -60,11 +61,12 @@ const AutoRushGame: React.FC<GameComponentProps> = ({
   const sceneRef = useRef<RushScene | null>(null);
   const audioRef = useRef<GameAudio | null>(null);
   const toastIdRef = useRef(0);
+  const routeRef = useRef<Point[] | null>(null);
   playersRef.current = players;
   if (!audioRef.current) audioRef.current = new GameAudio();
   const audio = audioRef.current;
 
-  const [hud, setHud] = useState<Hud>({ timeLeft: 0, rush: false, status: "", loaded: false, kmh: 0, boosted: false, scores: [] });
+  const [hud, setHud] = useState<Hud>({ timeLeft: 0, rush: false, status: "", distance: null, loaded: false, kmh: 0, boosted: false, scores: [] });
   const [hasMap, setHasMap] = useState(!!mapRef.current);
   const [sceneReady, setSceneReady] = useState(false);
   const [finalPlayers, setFinalPlayers] = useState<Player[] | null>(null);
@@ -100,7 +102,7 @@ const AutoRushGame: React.FC<GameComponentProps> = ({
       clockOffsetRef.current = snap.now - Date.now();
       const mine = snap.cars[playerId];
       if (mine && !meRef.current) {
-        meRef.current = { x: mine.x, y: mine.y, a: mine.a, s: 0, steer: 0, stunnedUntil: 0, busGraceUntil: 0 };
+        meRef.current = { x: mine.x, y: mine.y, a: mine.a, s: 0, steer: 0, stunnedUntil: 0, busGraceUntil: Date.now() + 4000, carGraceUntil: Date.now() + 4000 }; // a few safe seconds after spawning
       }
     };
 
@@ -299,6 +301,10 @@ const AutoRushGame: React.FC<GameComponentProps> = ({
             audio.play("crash");
             scene.shake(0.9);
             toast("Hit by a bus! 🚌", "bad");
+          } else if (result === 'car') {
+            audio.play("crash", 0.6, 400);
+            audio.play("horn", 0.5, 400);
+            scene.shake(0.45);
           } else if (result === 'wall') {
             audio.play("crash", 0.45, 500);
             scene.shake(0.3);
@@ -309,7 +315,7 @@ const AutoRushGame: React.FC<GameComponentProps> = ({
           if (t - lastBusHorn > 4500) {
             for (const bus of map.buses) {
               const b = busPosition(bus, serverNow);
-              if (Math.hypot(b.x - me.x, b.y - me.y) < 150) { audio.play("bushorn", 0.55); lastBusHorn = t; break; }
+              if (Math.hypot(b.x - me.x, b.y - me.y) < 110) { audio.play("bushorn", 0.55); lastBusHorn = t; break; }
             }
           }
         }
@@ -321,12 +327,29 @@ const AutoRushGame: React.FC<GameComponentProps> = ({
           names[p.id] = p.name;
           ghosts[p.id] = !!p.disconnected;
         }
-        scene.update({ serverNow, myId: playerId, me, snap, names, ghosts }, dt);
+
+        // GPS: to the drop-off when loaded, otherwise to the best nearby fare
+        const carriedNow = mine?.c != null ? snap.passengers.find(p => p.id === mine.c) : undefined;
+        let route: Point[] | null = null;
+        if (me && snap.status === 'active') {
+          if (carriedNow) route = routeTo(map, me, map.stops[carriedNow.to]);
+          else {
+            let best = Infinity;
+            for (const p of snap.passengers) {
+              if (p.carrier) continue;
+              const candidate = routeTo(map, me, map.stops[p.from]);
+              const length = routeLength(candidate);
+              if (length < best) { best = length; route = candidate; }
+            }
+          }
+        }
+        routeRef.current = route;
+        scene.update({ serverNow, myId: playerId, me, snap, names, ghosts, route, routeIsDropOff: !!carriedNow }, dt);
         scene.render();
 
         if (t - lastMinimap > 120) {
           lastMinimap = t;
-          drawMinimap(minimapRef.current, map, snap, playerId, me);
+          drawMinimap(minimapRef.current, map, snap, playerId, me, route, !!carriedNow);
         }
 
         if (t - lastHud > 200) {
@@ -338,9 +361,10 @@ const AutoRushGame: React.FC<GameComponentProps> = ({
             timeLeft: Math.ceil(msLeft / 1000),
             rush,
             loaded: !!carried,
+            distance: routeRef.current ? Math.round(routeLength(routeRef.current) / 12 / 10) * 10 : null,
             status: !mine ? "Spectating"
               : carried ? `Drop at ${map.stops[carried.to].name} · ₹${carried.fare * (rush ? 2 : 1)}`
-              : "Find a passenger",
+              : "Pick up a passenger",
             kmh: me ? Math.round(Math.abs(me.s) * KMH_PER_UNIT) : 0,
             boosted,
             scores: Object.keys(snap.cars).map(id => ({
@@ -461,7 +485,12 @@ const AutoRushGame: React.FC<GameComponentProps> = ({
       </div>
 
       {/* Minimap */}
-      <canvas ref={minimapRef} width={320} height={236} className="absolute top-16 right-3 w-36 sm:w-40 rounded-lg shadow-lg pointer-events-none" />
+      <div className="absolute top-16 right-3 pointer-events-none">
+        <canvas ref={minimapRef} width={480} height={353} className="w-40 sm:w-64 rounded-xl shadow-xl ring-2 ring-white/30" />
+        <div className="mt-1 text-center text-[11px] font-semibold text-white/90 bg-black/60 rounded-md px-2 py-0.5">
+          {hud.loaded ? "Follow the green line" : "Follow the yellow line"}{hud.distance != null ? ` · ${hud.distance} m` : ""}
+        </div>
+      </div>
 
       {/* Speedometer */}
       <div className="absolute bottom-4 right-4 flex items-end gap-2 pointer-events-none">
@@ -486,7 +515,7 @@ const AutoRushGame: React.FC<GameComponentProps> = ({
         "absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-bold shadow-lg pointer-events-none whitespace-nowrap max-w-[58vw] truncate backdrop-blur",
         hud.loaded ? "bg-emerald-500 text-white" : "bg-amber-400 text-black"
       )}>
-        {hud.status}
+        {hud.status}{hud.distance != null ? ` · ${hud.distance} m` : ""}
       </div>
 
       <div className="absolute bottom-4 left-3 text-[11px] text-white/90 bg-black/60 rounded-md px-2 py-1 pointer-events-none hidden md:block">
@@ -523,7 +552,10 @@ const AutoRushGame: React.FC<GameComponentProps> = ({
   );
 };
 
-function drawMinimap(canvas: HTMLCanvasElement | null, map: GameMap, snap: Snapshot, playerId: string, me: LocalCar | null) {
+function drawMinimap(
+  canvas: HTMLCanvasElement | null, map: GameMap, snap: Snapshot, playerId: string, me: LocalCar | null,
+  route: Point[] | null, routeIsDropOff: boolean,
+) {
   const ctx = canvas?.getContext("2d");
   if (!canvas || !ctx) return;
   const k = canvas.width / map.width;
@@ -533,27 +565,53 @@ function drawMinimap(canvas: HTMLCanvasElement | null, map: GameMap, snap: Snaps
 
   ctx.setTransform(k, 0, 0, k, 0, 0);
   ctx.clearRect(0, 0, map.width, map.height);
-  ctx.fillStyle = "rgba(8,8,16,0.8)";
+  ctx.fillStyle = "rgba(12,12,24,0.92)";
   ctx.fillRect(0, 0, map.width, map.height);
-  ctx.fillStyle = "rgba(255,255,255,0.22)";
+
+  // Blocks, tinted so parks and lakes work as landmarks
+  const tint: Record<string, string> = { park: "#1f5c33", water: "#1c5d8f", heritage: "#6b5a3c" };
+  for (const b of map.blocks) {
+    ctx.fillStyle = tint[b.kind] ?? "#2b2d3a";
+    ctx.fillRect(b.x + 8, b.y + 8, b.w - 16, b.h - 16);
+  }
+  ctx.fillStyle = "#6b7280";
   map.roadCols.forEach(c => ctx.fillRect(c * T, y0, road, y1 - y0));
   map.roadRows.forEach(r => ctx.fillRect(x0, r * T, x1 - x0, road));
 
-  const dot = (x: number, y: number, r: number, color: string) => {
+  const mine = snap.cars[playerId];
+  const carried = mine?.c != null ? snap.passengers.find(p => p.id === mine.c) : undefined;
+
+  // GPS route
+  if (route && route.length > 1) {
+    ctx.strokeStyle = routeIsDropOff ? "#4ade80" : "#facc15";
+    ctx.lineWidth = 34; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.beginPath();
+    route.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+    ctx.stroke();
+  }
+
+  const dot = (x: number, y: number, r: number, color: string, outline = "#0b0b14") => {
+    ctx.fillStyle = outline;
+    ctx.beginPath(); ctx.arc(x, y, r + 10, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = color;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
   };
-  const mine = snap.cars[playerId];
-  const carried = mine?.c != null ? snap.passengers.find(p => p.id === mine.c) : undefined;
   for (const p of snap.passengers) if (!p.carrier) dot(map.stops[p.from].x, map.stops[p.from].y, 26, "#facc15");
-  if (carried) dot(map.stops[carried.to].x, map.stops[carried.to].y, 44 + Math.sin(Date.now() / 150) * 10, "#4ade80");
+  if (carried) {
+    const dest = map.stops[carried.to];
+    dot(dest.x, dest.y, 46 + Math.sin(Date.now() / 150) * 10, "#4ade80");
+    ctx.fillStyle = "#ffffff"; ctx.font = "700 62px system-ui, sans-serif"; ctx.textAlign = "center";
+    ctx.fillText(dest.name, clamp(dest.x, 330, map.width - 330), dest.y > 220 ? dest.y - 76 : dest.y + 130);
+  }
   for (const [id, car] of Object.entries(snap.cars)) if (id !== playerId) dot(car.x, car.y, 30, colorFor(snap.cars, id));
   if (me) {
     // A wedge showing which way you're facing
     ctx.save();
     ctx.translate(me.x, me.y); ctx.rotate(me.a);
+    ctx.fillStyle = "#0b0b14";
+    ctx.beginPath(); ctx.moveTo(86, 0); ctx.lineTo(-52, -58); ctx.lineTo(-52, 58); ctx.closePath(); ctx.fill();
     ctx.fillStyle = "#ffffff";
-    ctx.beginPath(); ctx.moveTo(62, 0); ctx.lineTo(-36, -40); ctx.lineTo(-36, 40); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(66, 0); ctx.lineTo(-38, -42); ctx.lineTo(-38, 42); ctx.closePath(); ctx.fill();
     ctx.restore();
   }
 }

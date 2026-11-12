@@ -12,7 +12,7 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import {
-  Block, GameMap, LocalCar, Snapshot, BOOST_SPEED, busPosition, clamp, colorFor, wrapAngle,
+  Block, Bus, GameMap, LocalCar, Point, Snapshot, BOOST_SPEED, busPosition, clamp, colorFor, wrapAngle,
 } from "./shared";
 
 const S = 1 / 12; // map px → metres
@@ -25,6 +25,9 @@ export interface FrameState {
   snap: Snapshot;
   names: Record<string, string>;
   ghosts: Record<string, boolean>; // disconnected players
+  /** GPS line to the next pickup or drop-off, in map pixels. */
+  route: Point[] | null;
+  routeIsDropOff: boolean;
 }
 
 // ---- Small helpers ----
@@ -83,7 +86,12 @@ class Label {
 
 // ---- Asset loading ----
 
-interface Templates { auto: THREE.Object3D; bus: THREE.Object3D; charminar: THREE.Object3D | null }
+interface Templates {
+  auto: THREE.Object3D;
+  bus: THREE.Object3D;
+  cars: THREE.Object3D[];
+  landmarks: Record<string, THREE.Object3D>;
+}
 
 /** Scales a loaded model so its longest horizontal side is `length` metres, sits it on the ground and points its nose down +x. */
 function normalise(model: THREE.Object3D, length: number, yaw: number) {
@@ -111,6 +119,20 @@ function fallbackVehicle(length: number, width: number, height: number, color: n
   return group;
 }
 
+// Extra yaw so each generated vehicle's nose points down +x after normalising.
+const MODEL_YAW = { auto: Math.PI, bus: Math.PI, car0: 0, car1: 0 };
+
+// Landmark models, keyed by the block they stand on. `size` is the footprint in metres.
+const LANDMARK_MODELS: Record<string, { file: string; size: number; yaw?: number; light: number }> = {
+  "Charminar": { file: "charminar", size: 19, light: 0xffb86b },
+  "Golconda Fort": { file: "golconda", size: 24, light: 0xffc98a },
+  "Birla Mandir": { file: "birla", size: 20, light: 0xdfe8ff },
+  "Hussain Sagar": { file: "buddha", size: 7, light: 0xfff1cf },
+  "Hitech City": { file: "cybertower", size: 22, light: 0x9fd4ff },
+  "Secunderabad Station": { file: "clocktower", size: 8, light: 0xffd9a0 },
+  "Salar Jung Museum": { file: "museum", size: 24, light: 0xffe2b0 },
+};
+
 async function loadTemplates(): Promise<Templates> {
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
@@ -122,20 +144,23 @@ async function loadTemplates(): Promise<Templates> {
       return null; // fall back to a simple shape rather than failing the game
     }
   };
-  const [auto, bus, charminar] = await Promise.all([
+  const names = Object.keys(LANDMARK_MODELS);
+  const [auto, bus, car0, car1, ...landmarkModels] = await Promise.all([
     load("auto", 2.9, MODEL_YAW.auto),
     load("bus", 6.6, MODEL_YAW.bus),
-    load("charminar", 15, 0),
+    load("car0", 3.9, MODEL_YAW.car0),
+    load("car1", 4.1, MODEL_YAW.car1),
+    ...names.map(name => load(LANDMARK_MODELS[name].file, LANDMARK_MODELS[name].size, LANDMARK_MODELS[name].yaw ?? 0)),
   ]);
+  const landmarks: Record<string, THREE.Object3D> = {};
+  names.forEach((name, i) => { const model = landmarkModels[i]; if (model) landmarks[name] = model; });
   return {
     auto: auto ?? fallbackVehicle(2.8, 1.5, 1.7, 0xfacc15),
     bus: bus ?? fallbackVehicle(6.4, 2.6, 2.9, 0xdc2626),
-    charminar,
+    cars: [car0 ?? fallbackVehicle(3.8, 1.7, 1.3, 0xe5e7eb), car1 ?? fallbackVehicle(4, 1.7, 1.3, 0x1e3a8a)],
+    landmarks,
   };
 }
-
-// Extra yaw so each generated model's nose points down +x after normalising.
-const MODEL_YAW = { auto: Math.PI, bus: Math.PI };
 
 // ---- Static city ----
 
@@ -292,7 +317,12 @@ export class RushScene {
   private composer: EffectComposer | null = null;
   private bloom: UnrealBloomPass | null = null;
   private cars = new Map<string, CarVisual>();
-  private buses: THREE.Object3D[] = [];
+  private traffic: { def: Bus; visual: THREE.Object3D }[] = [];
+  private walkers: { block: Block; offset: number; speed: number }[] = [];
+  private walkerBodies!: THREE.InstancedMesh;
+  private walkerHeads!: THREE.InstancedMesh;
+  private routeSegments: THREE.Mesh[] = [];
+  private routeTexture!: THREE.CanvasTexture;
   private passengers: PassengerVisual[] = [];
   private chais: THREE.Group[] = [];
   private destination = new THREE.Group();
@@ -303,7 +333,7 @@ export class RushScene {
   private shakeAmount = 0;
   private time = 0;
 
-  private constructor(canvas: HTMLCanvasElement, private map: GameMap, private templates: Templates, highQuality: boolean) {
+  private constructor(canvas: HTMLCanvasElement, private map: GameMap, private templates: Templates, private highQuality: boolean) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: highQuality, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, highQuality ? 2 : 1.5));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -428,13 +458,19 @@ export class RushScene {
 
     for (const b of map.blocks) {
       const cx = (b.x + b.w / 2) * S, cz = (b.y + b.h / 2) * S;
-      if (b.name === "Charminar" && this.templates.charminar) {
-        const monument = this.templates.charminar;
-        monument.position.set(cx, 0, cz);
-        this.scene.add(monument);
-        const wash = new THREE.PointLight(0xffb86b, 260, 45, 1.6); // warm floodlighting
-        wash.position.set(cx, 9, cz + 13);
-        this.scene.add(wash);
+      const landmark = this.templates.landmarks[b.name];
+      if (landmark) {
+        landmark.position.set(cx, b.kind === "water" ? 1.2 : 0, cz);
+        this.scene.add(landmark);
+        if (this.highQuality) {
+          const wash = new THREE.PointLight(LANDMARK_MODELS[b.name].light, 55, 40, 1.4); // soft floodlighting
+          wash.position.set(cx, 15, cz + b.h * S / 2 - 2);
+          this.scene.add(wash);
+        }
+      }
+      if (landmark && b.kind !== "water") {
+        // The model is the block; just ring it with a few trees
+        for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) addTree(cx + sx * (b.w * S / 2 - 2.2), cz + sz * (b.h * S / 2 - 2.2), 0.9);
       } else if (b.kind === "tech") {
         gridOf(b, 2, 2, "glass", 20, 38);
       } else if (b.kind === "homes") {
@@ -467,8 +503,8 @@ export class RushScene {
         this.water.push(mat);
         if (b.name === "Hussain Sagar") {
           // The lake's rock island and its standing statue
-          domes.push(new THREE.CylinderGeometry(2.4, 3, 1.2, 10).translate(cx, 0.6, cz));
-          domes.push(new THREE.CylinderGeometry(0.55, 0.8, 7, 8).translate(cx, 4.7, cz));
+          domes.push(new THREE.CylinderGeometry(4.2, 4.8, 1.2, 12).translate(cx, 0.6, cz));
+          if (!landmark) domes.push(new THREE.CylinderGeometry(0.55, 0.8, 7, 8).translate(cx, 4.7, cz));
         } else {
           for (let i = 0; i < 6; i++) addTree(cx - b.w * S / 2 + 3 + i * (b.w * S - 6) / 5, cz + b.h * S / 2 - 2.2, 0.8);
         }
@@ -518,11 +554,63 @@ export class RushScene {
   }
 
   private buildDynamic() {
-    // Buses
-    for (let i = 0; i < this.map.buses.length; i++) {
-      const bus = this.templates.bus.clone();
-      this.scene.add(bus);
-      this.buses.push(bus);
+    // Traffic: buses and cars, each with headlights so you can see them coming
+    const lightMaterial = new THREE.MeshBasicMaterial({ color: 0xfff3c4, toneMapped: false });
+    const addTraffic = (def: Bus, template: THREE.Object3D, length: number, width: number) => {
+      const visual = new THREE.Group();
+      visual.add(template.clone());
+      for (const z of [-width * 0.32, width * 0.32]) {
+        const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), lightMaterial);
+        lamp.position.set(length / 2, 0.7, z);
+        visual.add(lamp);
+      }
+      this.scene.add(visual);
+      this.traffic.push({ def, visual });
+    };
+    for (const bus of this.map.buses) addTraffic(bus, this.templates.bus, 6.6, 2.6);
+    for (const car of this.map.cars ?? []) addTraffic(car, this.templates.cars[(car.style ?? 0) % this.templates.cars.length], 3.9, 1.7);
+
+    // Pedestrians strolling round the pavements. Purely scenery: they keep to
+    // the kerb and are placed from the clock, so they cost almost nothing.
+    const rand = mulberry32(99);
+    const count = this.highQuality ? 90 : 40;
+    const bodyGeo = mergeGeometries([
+      new THREE.CapsuleGeometry(0.19, 0.42, 3, 8).translate(0, 1.08, 0), // torso
+      new THREE.CylinderGeometry(0.075, 0.065, 0.74, 6).translate(0, 0.37, -0.1), // legs
+      new THREE.CylinderGeometry(0.075, 0.065, 0.74, 6).translate(0, 0.37, 0.1),
+      new THREE.CylinderGeometry(0.055, 0.05, 0.55, 5).translate(0, 1.05, -0.26), // arms
+      new THREE.CylinderGeometry(0.055, 0.05, 0.55, 5).translate(0, 1.05, 0.26),
+    ]);
+    const headGeo = new THREE.SphereGeometry(0.15, 8, 6);
+    headGeo.translate(0, 1.62, 0);
+    this.walkerBodies = new THREE.InstancedMesh(bodyGeo, new THREE.MeshStandardMaterial({ roughness: 0.9 }), count);
+    this.walkerHeads = new THREE.InstancedMesh(headGeo, new THREE.MeshStandardMaterial({ color: 0xc68642, roughness: 0.8 }), count);
+    const clothes = [0xe11d48, 0x2563eb, 0xf59e0b, 0x16a34a, 0xf8fafc, 0x9333ea, 0xfb7185, 0x0ea5e9, 0xfacc15];
+    const tint = new THREE.Color();
+    for (let i = 0; i < count; i++) {
+      const block = this.map.blocks[Math.floor(rand() * this.map.blocks.length)];
+      this.walkers.push({ block, offset: rand() * 1000, speed: (0.9 + rand() * 0.9) * (rand() < 0.5 ? 1 : -1) });
+      this.walkerBodies.setColorAt(i, tint.set(clothes[Math.floor(rand() * clothes.length)]));
+    }
+    this.walkerBodies.frustumCulled = this.walkerHeads.frustumCulled = false;
+    this.scene.add(this.walkerBodies, this.walkerHeads);
+
+    // GPS line painted on the road: chevrons that flow toward the objective
+    this.routeTexture = canvasTexture(64, 64, ctx => {
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 12; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.beginPath(); ctx.moveTo(14, 12); ctx.lineTo(42, 32); ctx.lineTo(14, 52); ctx.stroke();
+    }, true);
+    for (let i = 0; i < 3; i++) {
+      const texture = this.routeTexture.clone();
+      const geo = new THREE.PlaneGeometry(1, 1);
+      geo.rotateX(-Math.PI / 2);
+      const segment = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        map: texture, transparent: true, opacity: 0.85, depthWrite: false, toneMapped: false,
+      }));
+      segment.visible = false;
+      segment.renderOrder = 2;
+      this.scene.add(segment);
+      this.routeSegments.push(segment);
     }
 
     // Waiting passengers: a waving figure in a yellow marker beam
@@ -652,11 +740,48 @@ export class RushScene {
       if (!seen.has(id)) { this.scene.remove(car.group); this.cars.delete(id); }
     }
 
-    // Buses
-    map.buses.forEach((bus, i) => {
-      const p = busPosition(bus, serverNow);
-      this.buses[i].position.set(p.x * S, 0, p.y * S);
-      this.buses[i].rotation.y = -p.angle;
+    // Traffic
+    for (const { def, visual } of this.traffic) {
+      const p = busPosition(def, serverNow);
+      visual.position.set(p.x * S, 0, p.y * S);
+      visual.rotation.y = -p.angle;
+    }
+
+    // Pedestrians: walk each block's kerb as one loop
+    const matrix = new THREE.Matrix4(), spin = new THREE.Quaternion(), place = new THREE.Vector3(), unit = new THREE.Vector3(1, 1, 1), upAxis = new THREE.Vector3(0, 1, 0);
+    this.walkers.forEach((walker, i) => {
+      const inset = 0.75;
+      const w = walker.block.w * S - inset * 2, h = walker.block.h * S - inset * 2;
+      const lap = 2 * (w + h);
+      const d = (((walker.offset + this.time * walker.speed) % lap) + lap) % lap;
+      let x = 0, z = 0, heading = 0;
+      if (d < w) { x = d; z = 0; heading = 0; }
+      else if (d < w + h) { x = w; z = d - w; heading = Math.PI / 2; }
+      else if (d < 2 * w + h) { x = w - (d - w - h); z = h; heading = Math.PI; }
+      else { x = 0; z = h - (d - 2 * w - h); heading = -Math.PI / 2; }
+      if (walker.speed < 0) heading += Math.PI;
+      place.set(walker.block.x * S + inset + x, Math.abs(Math.sin(this.time * 7 + i)) * 0.05, walker.block.y * S + inset + z);
+      matrix.compose(place, spin.setFromAxisAngle(upAxis, -heading), unit);
+      this.walkerBodies.setMatrixAt(i, matrix);
+      this.walkerHeads.setMatrixAt(i, matrix);
+    });
+    this.walkerBodies.instanceMatrix.needsUpdate = true;
+    this.walkerHeads.instanceMatrix.needsUpdate = true;
+
+    // GPS line
+    const route = frame.route;
+    this.routeSegments.forEach((segment, i) => {
+      const from = route?.[i], to = route?.[i + 1];
+      const length = from && to ? Math.hypot(to.x - from.x, to.y - from.y) * S : 0;
+      segment.visible = length > 1;
+      if (!from || !to || length <= 1) return;
+      segment.position.set((from.x + to.x) / 2 * S, 0.09, (from.y + to.y) / 2 * S);
+      segment.rotation.y = -Math.atan2(to.y - from.y, to.x - from.x);
+      segment.scale.set(length, 1, 1.1);
+      const material = segment.material as THREE.MeshBasicMaterial;
+      material.color.set(frame.routeIsDropOff ? 0x4ade80 : 0xffd23f);
+      material.map!.repeat.set(length / 1.5, 1);
+      material.map!.offset.x = -this.time * 1.6;
     });
 
     // Waiting passengers
