@@ -261,6 +261,17 @@ function registerEvents(socket, io, rooms) {
     if (gs.status === 'active') ensureTicker(io, rooms, roomId);
   });
 
+  // Horns are heard by everyone nearby; the client fades them by distance
+  socket.on('auto-rush:horn', ({ roomId, playerId }) => {
+    const room = rooms[roomId];
+    if (!isAutoRush(room) || room.gameState.status !== 'active') return;
+    const car = room.gameState.cars[playerId];
+    const now = Date.now();
+    if (!car || now - (car.lastHorn || 0) < 400) return;
+    car.lastHorn = now;
+    socket.to(roomId).emit('auto-rush:horn', { by: playerId });
+  });
+
   socket.on('auto-rush:pos', ({ roomId, playerId, x, y, a, s }) => {
     const room = rooms[roomId];
     if (!isAutoRush(room) || room.gameState.status !== 'active') return;
