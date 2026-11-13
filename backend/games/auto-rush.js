@@ -4,6 +4,13 @@
 // owns everything that scores: passengers, pickups, deliveries, steals, chai
 // boosts and the match clock, and broadcasts a snapshot 10 times a second.
 // Match length reuses the shared `rounds` setting as minutes.
+//
+// The city is real: auto-rush-hyderabad.json holds central Hyderabad's road
+// network (built from OpenStreetMap by scripts/build-auto-rush-map.js). If that
+// file is missing, or AUTO_RUSH_MAP=grid is set, the original grid city is used.
+
+const fs = require('fs');
+const path = require('path');
 
 const TILE = 48;
 const ROAD_TILES = 2;
@@ -21,7 +28,6 @@ const STEAL_MIN_SPEED = 120;
 const STEAL_IMMUNITY_MS = 3000;
 const BOOST_MS = 4000;
 const RUSH_HOUR_MS = 30000; // fares double in the final stretch
-const MAX_CHAIS = 4;
 const MAX_SPEED = 420; // px/s incl. boost; used to reject teleporting clients
 
 // [name, emoji, kind] — one per city block, row by row.
@@ -75,13 +81,35 @@ function buildMap() {
   };
 }
 
-const MAP = buildMap();
+function loadRealMap() {
+  if (process.env.AUTO_RUSH_MAP === 'grid') return null;
+  try {
+    const map = JSON.parse(fs.readFileSync(path.join(__dirname, 'auto-rush-hyderabad.json'), 'utf8'));
+    return map.roads && map.stops.length > 1 ? map : null;
+  } catch {
+    return null;
+  }
+}
+
+const MAP = loadRealMap() || buildMap();
+const REAL = !!MAP.roads;
+const MAX_CHAIS = REAL ? 14 : 4; // the real city is far bigger than the grid
+// On the real map everyone starts at a stop near the middle of town
+const SPAWN_STOPS = REAL ? (() => {
+  const cx = MAP.stops.reduce((sum, s) => sum + s.x, 0) / MAP.stops.length;
+  const cy = MAP.stops.reduce((sum, s) => sum + s.y, 0) / MAP.stops.length;
+  return [...MAP.stops].sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
+})() : [];
 const tickers = new Map(); // roomId -> interval
 
 const rand = (n) => Math.floor(Math.random() * n);
 const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
 
 function spawnPoint(index) {
+  if (REAL) {
+    const stop = SPAWN_STOPS[index % SPAWN_STOPS.length];
+    return { x: stop.x, y: stop.y, a: stop.a || 0 };
+  }
   // Intersections, spread across the map
   const cols = MAP.roadCols, rows = MAP.roadRows;
   const c = cols[(index * 2 + 1) % cols.length];
@@ -90,8 +118,8 @@ function spawnPoint(index) {
 }
 
 function addCar(gs, playerId) {
-  const { x, y } = spawnPoint(Object.keys(gs.cars).length);
-  gs.cars[playerId] = { x, y, a: 0, s: 0, carrying: null, boostUntil: 0, immuneUntil: 0, deliveries: 0, lastSeen: Date.now() };
+  const { x, y, a = 0 } = spawnPoint(Object.keys(gs.cars).length);
+  gs.cars[playerId] = { x, y, a, s: 0, carrying: null, boostUntil: 0, immuneUntil: 0, deliveries: 0, lastSeen: Date.now() };
   return gs.cars[playerId];
 }
 
@@ -100,9 +128,14 @@ function spawnPassenger(gs) {
   const free = MAP.stops.filter(s => !taken.has(s.id));
   if (free.length === 0) return;
   const from = free[rand(free.length)];
-  const far = MAP.stops.filter(s => s.id !== from.id && dist(s.x, s.y, from.x, from.y) > 500);
+  // Real-city fares stay within a few neighbourhoods so a trip takes well under a minute
+  const [near, farthest] = REAL ? [1400, 6500] : [500, Infinity];
+  const others = MAP.stops.filter(s => s.id !== from.id);
+  const inRange = others.filter(s => { const d = dist(s.x, s.y, from.x, from.y); return d > near && d < farthest; });
+  const far = inRange.length ? inRange : others;
   const to = far[rand(far.length)];
-  const trip = Math.abs(to.x - from.x) + Math.abs(to.y - from.y);
+  // Roads wind, so the real trip is longer than the straight line; fares are scaled to match the grid's
+  const trip = REAL ? dist(to.x, to.y, from.x, from.y) * 1.3 / 2 : Math.abs(to.x - from.x) + Math.abs(to.y - from.y);
   gs.passengers.push({
     id: gs.nextId++,
     from: from.id,
@@ -113,6 +146,16 @@ function spawnPassenger(gs) {
 }
 
 function spawnChai(gs) {
+  if (REAL) {
+    // Anywhere along a real road
+    const { nodes, ways } = MAP.roads;
+    const way = ways[rand(ways.length)];
+    const i = 1 + rand(way.n.length - 1), t = Math.random();
+    const ax = nodes[way.n[i - 1] * 2], ay = nodes[way.n[i - 1] * 2 + 1];
+    const bx = nodes[way.n[i] * 2], by = nodes[way.n[i] * 2 + 1];
+    gs.chais.push({ id: gs.nextId++, x: Math.round(ax + (bx - ax) * t), y: Math.round(ay + (by - ay) * t) });
+    return;
+  }
   // Anywhere along a road centre line
   const horizontal = Math.random() < 0.5;
   const cols = MAP.roadCols, rows = MAP.roadRows;
@@ -125,6 +168,7 @@ function spawnChai(gs) {
 
 function targetPassengerCount(room) {
   const humans = room.players.filter(p => !p.disconnected).length;
+  if (REAL) return Math.max(8, Math.min(14, humans * 2 + 6));
   return Math.max(3, Math.min(8, humans + 2));
 }
 

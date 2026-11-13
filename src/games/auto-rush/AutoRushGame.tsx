@@ -11,7 +11,7 @@ import { GameAudio } from "./audio";
 import { RushScene } from "./scene";
 import {
   BOOST_SPEED, GameEvent, GameMap, InitPayload, KMH_PER_UNIT, LocalCar, MAX_SPEED, Snapshot,
-  Point, busPosition, clamp, colorFor, routeLength, routeTo, stepCar,
+  Point, busPosition, clamp, colorFor, roadIndex, routeLength, routeTo, stepCar,
 } from "./shared";
 
 const SEND_INTERVAL_MS = 80;
@@ -270,7 +270,8 @@ const AutoRushGame: React.FC<GameComponentProps> = ({
       observer.observe(wrap);
 
       let last = performance.now();
-      let lastHud = 0, lastMinimap = 0, lastBusHorn = 0;
+      let lastHud = 0, lastMinimap = 0, lastBusHorn = 0, lastRoute = -Infinity;
+      let route: Point[] | null = null;
 
       const frame = (t: number) => {
         raf = requestAnimationFrame(frame);
@@ -330,19 +331,23 @@ const AutoRushGame: React.FC<GameComponentProps> = ({
 
         // GPS: to the drop-off when loaded, otherwise to the best nearby fare
         const carriedNow = mine?.c != null ? snap.passengers.find(p => p.id === mine.c) : undefined;
-        let route: Point[] | null = null;
-        if (me && snap.status === 'active') {
-          if (carriedNow) route = routeTo(map, me, map.stops[carriedNow.to]);
+        // Re-planned a few times a second; in between, the line just stays attached to the auto.
+        if (!me || snap.status !== 'active') route = null;
+        else if (t - lastRoute > 150) {
+          lastRoute = t;
+          const from = { x: me.x, y: me.y };
+          route = null;
+          if (carriedNow) route = routeTo(map, from, map.stops[carriedNow.to]);
           else {
             let best = Infinity;
             for (const p of snap.passengers) {
               if (p.carrier) continue;
-              const candidate = routeTo(map, me, map.stops[p.from]);
+              const candidate = routeTo(map, from, map.stops[p.from]);
               const length = routeLength(candidate);
               if (length < best) { best = length; route = candidate; }
             }
           }
-        }
+        } else if (route) route[0] = { x: me.x, y: me.y };
         routeRef.current = route;
         scene.update({ serverNow, myId: playerId, me, snap, names, ghosts, route, routeIsDropOff: !!carriedNow }, dt);
         scene.render();
@@ -490,6 +495,9 @@ const AutoRushGame: React.FC<GameComponentProps> = ({
         <div className="mt-1 text-center text-[11px] font-semibold text-white/90 bg-black/60 rounded-md px-2 py-0.5">
           {hud.loaded ? "Follow the green line" : "Follow the yellow line"}{hud.distance != null ? ` · ${hud.distance} m` : ""}
         </div>
+        {mapRef.current?.attribution && (
+          <div className="mt-0.5 text-center text-[9px] text-white/60">Roads {mapRef.current.attribution}</div>
+        )}
       </div>
 
       {/* Speedometer */}
@@ -558,25 +566,48 @@ function drawMinimap(
 ) {
   const ctx = canvas?.getContext("2d");
   if (!canvas || !ctx) return;
-  const k = canvas.width / map.width;
-  const T = map.tile, road = map.roadTiles * T;
-  const x0 = map.roadCols[0] * T, x1 = map.roadCols[map.roadCols.length - 1] * T + road;
-  const y0 = map.roadRows[0] * T, y1 = map.roadRows[map.roadRows.length - 1] * T + road;
+  const roads = roadIndex(map);
+  // The grid fits on the minimap whole. The real city is far too big, so there the minimap follows the auto.
+  const viewW = roads ? 4200 : map.width, viewH = viewW * canvas.height / canvas.width;
+  const focus = me ?? Object.values(snap.cars)[0] ?? { x: map.width / 2, y: map.height / 2 };
+  const vx = roads ? clamp(focus.x - viewW / 2, 0, Math.max(0, map.width - viewW)) : 0;
+  const vy = roads ? clamp(focus.y - viewH / 2, 0, Math.max(0, map.height - viewH)) : 0;
+  const k = canvas.width / viewW;
+  const u = viewW / 2352; // marker sizes below were tuned for the grid map's width
 
-  ctx.setTransform(k, 0, 0, k, 0, 0);
-  ctx.clearRect(0, 0, map.width, map.height);
+  ctx.setTransform(k, 0, 0, k, -vx * k, -vy * k);
+  ctx.clearRect(vx, vy, viewW, viewH);
   ctx.fillStyle = "rgba(12,12,24,0.92)";
-  ctx.fillRect(0, 0, map.width, map.height);
+  ctx.fillRect(vx, vy, viewW, viewH);
 
   // Blocks, tinted so parks and lakes work as landmarks
   const tint: Record<string, string> = { park: "#1f5c33", water: "#1c5d8f", heritage: "#6b5a3c" };
+  const water = map.water ?? [];
+  ctx.fillStyle = tint.water;
+  for (let i = 0; i < water.length; i += 4) ctx.fillRect(water[i], water[i + 1], water[i + 2], water[i + 3] + 1);
   for (const b of map.blocks) {
     ctx.fillStyle = tint[b.kind] ?? "#2b2d3a";
     ctx.fillRect(b.x + 8, b.y + 8, b.w - 16, b.h - 16);
   }
-  ctx.fillStyle = "#6b7280";
-  map.roadCols.forEach(c => ctx.fillRect(c * T, y0, road, y1 - y0));
-  map.roadRows.forEach(r => ctx.fillRect(x0, r * T, x1 - x0, road));
+  if (map.roads) {
+    const { nodes, ways } = map.roads;
+    const visible = (n: number) => nodes[n * 2] > vx - 300 && nodes[n * 2] < vx + viewW + 300 && nodes[n * 2 + 1] > vy - 300 && nodes[n * 2 + 1] < vy + viewH + 300;
+    ctx.strokeStyle = "#6b7280"; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    for (const way of ways) {
+      if (!way.n.some(visible)) continue;
+      ctx.lineWidth = way.w;
+      ctx.beginPath();
+      way.n.forEach((n, i) => (i === 0 ? ctx.moveTo(nodes[n * 2], nodes[n * 2 + 1]) : ctx.lineTo(nodes[n * 2], nodes[n * 2 + 1])));
+      ctx.stroke();
+    }
+  } else {
+    const T = map.tile, road = map.roadTiles * T;
+    const x0 = map.roadCols[0] * T, x1 = map.roadCols[map.roadCols.length - 1] * T + road;
+    const y0 = map.roadRows[0] * T, y1 = map.roadRows[map.roadRows.length - 1] * T + road;
+    ctx.fillStyle = "#6b7280";
+    map.roadCols.forEach(c => ctx.fillRect(c * T, y0, road, y1 - y0));
+    map.roadRows.forEach(r => ctx.fillRect(x0, r * T, x1 - x0, road));
+  }
 
   const mine = snap.cars[playerId];
   const carried = mine?.c != null ? snap.passengers.find(p => p.id === mine.c) : undefined;
@@ -584,7 +615,7 @@ function drawMinimap(
   // GPS route
   if (route && route.length > 1) {
     ctx.strokeStyle = routeIsDropOff ? "#4ade80" : "#facc15";
-    ctx.lineWidth = 34; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.lineWidth = 34 * u; ctx.lineCap = "round"; ctx.lineJoin = "round";
     ctx.beginPath();
     route.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
     ctx.stroke();
@@ -592,22 +623,24 @@ function drawMinimap(
 
   const dot = (x: number, y: number, r: number, color: string, outline = "#0b0b14") => {
     ctx.fillStyle = outline;
-    ctx.beginPath(); ctx.arc(x, y, r + 10, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, (r + 10) * u, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = color;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, r * u, 0, Math.PI * 2); ctx.fill();
   };
   for (const p of snap.passengers) if (!p.carrier) dot(map.stops[p.from].x, map.stops[p.from].y, 26, "#facc15");
   if (carried) {
     const dest = map.stops[carried.to];
-    dot(dest.x, dest.y, 46 + Math.sin(Date.now() / 150) * 10, "#4ade80");
-    ctx.fillStyle = "#ffffff"; ctx.font = "700 62px system-ui, sans-serif"; ctx.textAlign = "center";
-    ctx.fillText(dest.name, clamp(dest.x, 330, map.width - 330), dest.y > 220 ? dest.y - 76 : dest.y + 130);
+    // A drop-off beyond the edge of the view is pinned to that edge, so it still shows which way to go
+    const dx = clamp(dest.x, vx + 70 * u, vx + viewW - 70 * u), dy = clamp(dest.y, vy + 70 * u, vy + viewH - 70 * u);
+    dot(dx, dy, 46 + Math.sin(Date.now() / 150) * 10, "#4ade80");
+    ctx.fillStyle = "#ffffff"; ctx.font = `700 ${Math.round(62 * u)}px system-ui, sans-serif`; ctx.textAlign = "center";
+    ctx.fillText(dest.name, clamp(dx, vx + 330 * u, vx + viewW - 330 * u), dy - vy > 220 * u ? dy - 76 * u : dy + 130 * u);
   }
   for (const [id, car] of Object.entries(snap.cars)) if (id !== playerId) dot(car.x, car.y, 30, colorFor(snap.cars, id));
   if (me) {
     // A wedge showing which way you're facing
     ctx.save();
-    ctx.translate(me.x, me.y); ctx.rotate(me.a);
+    ctx.translate(me.x, me.y); ctx.rotate(me.a); ctx.scale(u, u);
     ctx.fillStyle = "#0b0b14";
     ctx.beginPath(); ctx.moveTo(86, 0); ctx.lineTo(-52, -58); ctx.lineTo(-52, 58); ctx.closePath(); ctx.fill();
     ctx.fillStyle = "#ffffff";

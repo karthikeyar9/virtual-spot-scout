@@ -12,7 +12,7 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import {
-  Block, Bus, GameMap, LocalCar, Point, Snapshot, BOOST_SPEED, busPosition, clamp, colorFor, wrapAngle,
+  Block, Bus, GameMap, LocalCar, Point, Roads, Snapshot, BOOST_SPEED, busPosition, clamp, colorFor, roadClearance, roadIndex, wrapAngle,
 } from "./shared";
 
 const S = 1 / 12; // map px → metres
@@ -286,6 +286,71 @@ function drawGround(ctx: CanvasRenderingContext2D, map: GameMap, lamps: { x: num
   ctx.globalCompositeOperation = "source-over";
 }
 
+/** Collects flat, upward-facing triangles (roads, kerbs, the lake) into one geometry. */
+class Surface {
+  private position: number[] = [];
+  private uv: number[] = [];
+  private index: number[] = [];
+
+  /** A ribbon of the given half-width along a polyline. UVs run 0..1 across and in metres along. */
+  ribbon(points: { x: number; z: number }[], half: number, y: number) {
+    const base = this.position.length / 3;
+    const unit = (x: number, z: number) => { const l = Math.hypot(x, z); return l > 0 ? [x / l, z / l] : null; };
+    let along = 0;
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i], prev = points[i - 1], next = points[i + 1];
+      if (prev) along += Math.hypot(p.x - prev.x, p.z - prev.z);
+      const before = prev ? unit(p.x - prev.x, p.z - prev.z) : null;
+      const after = next ? unit(next.x - p.x, next.z - p.z) : null;
+      const a = before ?? after ?? [1, 0], b = after ?? before ?? [1, 0];
+      const t = unit(a[0] + b[0], a[1] + b[1]) ?? a;
+      // Widen at bends so the ribbon keeps its width (capped, for hairpins)
+      const miter = Math.min(1.8, 1 / Math.max(0.2, t[0] * a[0] + t[1] * a[1]));
+      const nx = -t[1] * half * miter, nz = t[0] * half * miter;
+      this.position.push(p.x + nx, y, p.z + nz, p.x - nx, y, p.z - nz);
+      this.uv.push(0, along, 1, along);
+      if (i > 0) { const k = base + i * 2; this.index.push(k - 2, k - 1, k, k - 1, k + 1, k); }
+    }
+  }
+
+  /** A filled circle, used to round off road ends and junctions. */
+  disc(centre: { x: number; z: number }, radius: number, y: number) {
+    const base = this.position.length / 3, sides = 14;
+    this.position.push(centre.x, y, centre.z);
+    this.uv.push(0.5, 0);
+    for (let i = 0; i < sides; i++) {
+      const angle = i / sides * Math.PI * 2;
+      this.position.push(centre.x + Math.cos(angle) * radius, y, centre.z + Math.sin(angle) * radius);
+      this.uv.push(0.5, 0);
+      this.index.push(base, base + 1 + i, base + 1 + (i + 1) % sides);
+    }
+  }
+
+  rect(x: number, z: number, w: number, d: number, y: number) {
+    const base = this.position.length / 3;
+    this.position.push(x, y, z, x + w, y, z, x, y, z + d, x + w, y, z + d);
+    this.uv.push(0, 0, 1, 0, 0, 1, 1, 1);
+    this.index.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+  }
+
+  get empty() { return this.index.length === 0; }
+
+  /** With `worldTile`, UVs are replaced by world position so a texture tiles evenly whatever the road's shape. */
+  build(worldTile?: number) {
+    const geo = new THREE.BufferGeometry();
+    const count = this.position.length / 3;
+    const uv = new Float32Array(this.uv);
+    if (worldTile) for (let i = 0; i < count; i++) { uv[i * 2] = this.position[i * 3] / worldTile; uv[i * 2 + 1] = this.position[i * 3 + 2] / worldTile; }
+    const normal = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) normal[i * 3 + 1] = 1;
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(this.position, 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(normal, 3));
+    geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    geo.setIndex(this.index);
+    return geo;
+  }
+}
+
 const NEON = ["#ff3fa4", "#35e0ff", "#ffd23f", "#7dff6b", "#ff7b3f", "#b98cff"];
 
 function neonSign(name: string, color: string) {
@@ -317,7 +382,8 @@ export class RushScene {
   private composer: EffectComposer | null = null;
   private bloom: UnrealBloomPass | null = null;
   private cars = new Map<string, CarVisual>();
-  private traffic: { def: Bus; visual: THREE.Object3D }[] = [];
+  private traffic: { def: Bus; visual: THREE.Object3D; heading: number }[] = [];
+  private dome!: THREE.Mesh;
   private walkers: { block: Block; offset: number; speed: number }[] = [];
   private walkerBodies!: THREE.InstancedMesh;
   private walkerHeads!: THREE.InstancedMesh;
@@ -370,6 +436,7 @@ export class RushScene {
     );
     dome.position.set(this.map.width * S / 2, 0, this.map.height * S / 2);
     this.scene.add(dome);
+    this.dome = dome; // follows the camera, since a real city is wider than the dome
 
     this.scene.add(new THREE.HemisphereLight(0x8a7bd8, 0x3a2a26, 1.5));
     const moon = new THREE.DirectionalLight(0xa8b8ff, 0.9);
@@ -382,28 +449,32 @@ export class RushScene {
     const W = map.width * S, H = map.height * S;
     const rand = mulberry32(2026);
 
-    // Street lamps at block corners
     const lamps: { x: number; y: number }[] = [];
-    for (const b of map.blocks) {
-      for (const [dx, dy] of [[10, 10], [b.w - 10, 10], [10, b.h - 10], [b.w - 10, b.h - 10], [b.w / 2, 10], [b.w / 2, b.h - 10]]) {
-        lamps.push({ x: b.x + dx, y: b.y + dy });
+    if (map.roads) {
+      this.buildRoads(map.roads, lamps);
+    } else {
+      // Street lamps at block corners
+      for (const b of map.blocks) {
+        for (const [dx, dy] of [[10, 10], [b.w - 10, 10], [10, b.h - 10], [b.w - 10, b.h - 10], [b.w / 2, 10], [b.w / 2, b.h - 10]]) {
+          lamps.push({ x: b.x + dx, y: b.y + dy });
+        }
       }
-    }
 
-    // Ground
-    const groundTex = canvasTexture(
-      Math.round(map.width * GROUND_TEX_SCALE), Math.round(map.height * GROUND_TEX_SCALE),
-      ctx => drawGround(ctx, map, lamps),
-    );
-    groundTex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(W, H),
-      new THREE.MeshStandardMaterial({ map: groundTex, roughness: 0.42, metalness: 0.15 }),
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.set(W / 2, 0, H / 2);
-    this.scene.add(ground);
-    const outskirts = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), new THREE.MeshBasicMaterial({ color: 0x0b0a12 }));
+      // Ground
+      const groundTex = canvasTexture(
+        Math.round(map.width * GROUND_TEX_SCALE), Math.round(map.height * GROUND_TEX_SCALE),
+        ctx => drawGround(ctx, map, lamps),
+      );
+      groundTex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(W, H),
+        new THREE.MeshStandardMaterial({ map: groundTex, roughness: 0.42, metalness: 0.15 }),
+      );
+      ground.rotation.x = -Math.PI / 2;
+      ground.position.set(W / 2, 0, H / 2);
+      this.scene.add(ground);
+    }
+    const outskirts = new THREE.Mesh(new THREE.PlaneGeometry(Math.max(1400, W + 600), Math.max(1400, H + 600)), new THREE.MeshBasicMaterial({ color: 0x0b0a12 }));
     outskirts.rotation.x = -Math.PI / 2;
     outskirts.position.set(W / 2, -0.05, H / 2);
     this.scene.add(outskirts);
@@ -439,9 +510,9 @@ export class RushScene {
     const leaves: THREE.BufferGeometry[] = [];
     const domes: THREE.BufferGeometry[] = [];
 
-    const addBuilding = (style: string, cx: number, cz: number, w: number, d: number, h: number) => {
-      walls[style].push(wallsGeometry(w, h, d).translate(cx, 0, cz));
-      roofs.push(roofGeometry(w, h, d).translate(cx, 0, cz));
+    const addBuilding = (style: string, cx: number, cz: number, w: number, d: number, h: number, yaw = 0) => {
+      walls[style].push(wallsGeometry(w, h, d).rotateY(yaw).translate(cx, 0, cz));
+      roofs.push(roofGeometry(w, h, d).rotateY(yaw).translate(cx, 0, cz));
     };
     const addTree = (x: number, z: number, size: number) => {
       trunks.push(new THREE.CylinderGeometry(0.15, 0.2, 1.6 * size, 5).translate(x, 0.8 * size, z));
@@ -520,6 +591,8 @@ export class RushScene {
       this.scene.add(south, north);
     }
 
+    if (map.roads) this.lineStreets(map.roads, addBuilding, addTree, rand);
+
     // A dark skyline ring outside the playable grid, for depth
     for (let i = 0; i < 70; i++) {
       const angle = rand() * Math.PI * 2;
@@ -538,6 +611,201 @@ export class RushScene {
     merged(trunks, new THREE.MeshStandardMaterial({ color: 0x3b2a1e }));
     merged(leaves, new THREE.MeshStandardMaterial({ color: 0x1f6b35, roughness: 0.9, flatShading: true }));
     merged(domes, new THREE.MeshStandardMaterial({ color: 0xb9a888, roughness: 0.7 }));
+  }
+
+  /**
+   * Real-road maps: the ground, tarmac ribbons with kerbs and lane dashes, the
+   * lake and the auto stands. Fills `lamps` with street-lamp positions.
+   */
+  private buildRoads(roads: Roads, lamps: { x: number; y: number }[]) {
+    const map = this.map;
+    const W = map.width * S, H = map.height * S;
+    const index = roadIndex(map)!;
+    // Flat layers sit a few centimetres apart; the offset stops them flickering at a distance
+    const layer = (order: number) => ({ polygonOffset: true, polygonOffsetFactor: -order, polygonOffsetUnits: -order });
+
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshStandardMaterial({ color: 0x1b1c22, roughness: 0.92 }));
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.set(W / 2, 0, H / 2);
+    this.scene.add(ground);
+
+    const kerb = new Surface(), tarmac = new Surface(), dashes = new Surface();
+    for (const way of roads.ways) {
+      const points = way.n.map(n => ({ x: roads.nodes[n * 2] * S, z: roads.nodes[n * 2 + 1] * S }));
+      const half = way.w / 2 * S;
+      kerb.ribbon(points, half + 0.45, 0.02);
+      tarmac.ribbon(points, half, 0.04);
+      dashes.ribbon(points, 0.11, 0.06);
+      for (const end of [points[0], points[points.length - 1]]) {
+        kerb.disc(end, half + 0.45, 0.02);
+        tarmac.disc(end, half, 0.04);
+      }
+    }
+    const grain = canvasTexture(256, 256, ctx => {
+      ctx.fillStyle = "#23252c"; ctx.fillRect(0, 0, 256, 256);
+      const rand = mulberry32(7);
+      for (let i = 0; i < 900; i++) {
+        ctx.fillStyle = rand() < 0.5 ? "rgba(255,255,255,0.035)" : "rgba(0,0,0,0.12)";
+        ctx.fillRect(rand() * 256, rand() * 256, 2 + rand() * 5, 2 + rand() * 5);
+      }
+    }, true);
+    grain.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    const dashTex = canvasTexture(8, 64, ctx => { ctx.fillStyle = "rgba(250,204,21,0.75)"; ctx.fillRect(0, 0, 8, 35); }, true);
+    dashTex.repeat.set(1, 0.3); // one dash-and-gap every 3.3 m
+    this.scene.add(
+      new THREE.Mesh(kerb.build(), new THREE.MeshStandardMaterial({ color: 0x6b6f78, roughness: 0.9, side: THREE.DoubleSide, ...layer(1) })),
+      new THREE.Mesh(tarmac.build(14), new THREE.MeshStandardMaterial({ map: grain, roughness: 0.42, metalness: 0.15, side: THREE.DoubleSide, ...layer(2) })),
+      new THREE.Mesh(dashes.build(), new THREE.MeshBasicMaterial({ map: dashTex, transparent: true, depthWrite: false, side: THREE.DoubleSide, ...layer(3) })),
+    );
+
+    // Landmark plots: a paved (or grassed) pad beside the road
+    const paved = new Surface(), grass = new Surface();
+    for (const b of map.blocks) {
+      if (b.kind !== "water") (b.kind === "park" ? grass : paved).rect(b.x * S, b.y * S, b.w * S, b.h * S, 0.02);
+    }
+    if (!paved.empty) this.scene.add(new THREE.Mesh(paved.build(), new THREE.MeshStandardMaterial({ color: 0x34363e, roughness: 0.9, side: THREE.DoubleSide, ...layer(1) })));
+    if (!grass.empty) this.scene.add(new THREE.Mesh(grass.build(), new THREE.MeshStandardMaterial({ color: 0x17361f, roughness: 0.95, side: THREE.DoubleSide, ...layer(1) })));
+
+    // Hussain Sagar
+    const lake = new Surface();
+    const water = map.water ?? [];
+    for (let i = 0; i < water.length; i += 4) lake.rect(water[i] * S, water[i + 1] * S, water[i + 2] * S, water[i + 3] * S, 0.03);
+    if (!lake.empty) {
+      const mat = new THREE.MeshStandardMaterial({ color: 0x0d3f66, roughness: 0.12, metalness: 0.75, emissive: 0x06243d, side: THREE.DoubleSide, ...layer(1) });
+      this.scene.add(new THREE.Mesh(lake.build(), mat));
+      this.water.push(mat);
+    }
+
+    // Auto stands, painted across the road at each stop
+    const standTex = canvasTexture(136, 88, ctx => {
+      ctx.strokeStyle = "rgba(250,204,21,0.9)"; ctx.lineWidth = 6; ctx.strokeRect(3, 3, 130, 82);
+      ctx.fillStyle = "rgba(250,204,21,0.9)";
+      ctx.font = "700 30px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("AUTO", 68, 46);
+    });
+    const standGeo = new THREE.PlaneGeometry(68 * S, 44 * S);
+    standGeo.rotateX(-Math.PI / 2);
+    const standMat = new THREE.MeshBasicMaterial({ map: standTex, transparent: true, depthWrite: false, ...layer(4) });
+    for (const stop of map.stops) {
+      const stand = new THREE.Mesh(standGeo, standMat);
+      stand.position.set(stop.x * S, 0.07, stop.y * S);
+      stand.rotation.y = -(stop.a ?? 0);
+      this.scene.add(stand);
+    }
+
+    // Street lamps down alternating sides of every road, thinned where roads bunch up
+    const lit = new Set<number>();
+    for (const way of roads.ways) {
+      let carry = 210, side = 1;
+      for (let k = 1; k < way.n.length; k++) {
+        const ax = roads.nodes[way.n[k - 1] * 2], ay = roads.nodes[way.n[k - 1] * 2 + 1];
+        const bx = roads.nodes[way.n[k] * 2], by = roads.nodes[way.n[k] * 2 + 1];
+        const len = Math.hypot(bx - ax, by - ay) || 1;
+        const ux = (bx - ax) / len, uy = (by - ay) / len;
+        for (; carry < len; carry += 420, side = -side) {
+          const x = ax + ux * carry - uy * side * (way.w / 2 + 9), y = ay + uy * carry + ux * side * (way.w / 2 + 9);
+          const cell = Math.floor(x / 190) * 4096 + Math.floor(y / 190);
+          if (lit.has(cell) || roadClearance(index, x, y) < 4) continue;
+          lit.add(cell);
+          lamps.push({ x, y });
+        }
+        carry -= len;
+      }
+    }
+
+    // A pool of light under each lamp
+    if (this.highQuality && lamps.length) {
+      const poolTex = canvasTexture(64, 64, ctx => {
+        const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+        g.addColorStop(0, "rgba(255,176,96,0.42)"); g.addColorStop(1, "rgba(255,176,96,0)");
+        ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
+      });
+      const poolGeo = new THREE.PlaneGeometry(16, 16);
+      poolGeo.rotateX(-Math.PI / 2);
+      const pools = new THREE.InstancedMesh(poolGeo, new THREE.MeshBasicMaterial({
+        map: poolTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, ...layer(5),
+      }), lamps.length);
+      const m = new THREE.Matrix4();
+      lamps.forEach((lamp, i) => pools.setMatrixAt(i, m.makeTranslation(lamp.x * S, 0.08, lamp.y * S)));
+      pools.frustumCulled = false;
+      this.scene.add(pools);
+    }
+  }
+
+  /** Real-road maps: buildings and trees along both sides of every road, facing it, wherever there is room. */
+  private lineStreets(
+    roads: Roads,
+    addBuilding: (style: string, cx: number, cz: number, w: number, d: number, h: number, yaw?: number) => void,
+    addTree: (x: number, z: number, size: number) => void,
+    rand: () => number,
+  ) {
+    const map = this.map;
+    const index = roadIndex(map)!;
+    const density = this.highQuality ? 1 : 0.55;
+
+    const lake = new Set<number>();
+    const water = map.water ?? [];
+    for (let i = 0; i < water.length; i += 4) {
+      for (let x = water[i]; x < water[i] + water[i + 2]; x += 48) lake.add(Math.floor(x / 48) * 4096 + Math.floor(water[i + 1] / 48));
+    }
+    const inLake = (x: number, y: number) => lake.has(Math.floor(x / 48) * 4096 + Math.floor(y / 48));
+    const inPlot = (x: number, y: number, margin: number) =>
+      map.blocks.some(b => x > b.x - margin && x < b.x + b.w + margin && y > b.y - margin && y < b.y + b.h + margin);
+
+    // Footprints already used, bucketed so the overlap test stays cheap
+    const CELL = 200;
+    const taken = new Map<number, { x: number; y: number; r: number }[]>();
+    const claim = (x: number, y: number, r: number) => {
+      const cx = Math.floor(x / CELL), cy = Math.floor(y / CELL);
+      for (let i = cx - 1; i <= cx + 1; i++) for (let j = cy - 1; j <= cy + 1; j++) {
+        for (const other of taken.get(i * 4096 + j) ?? []) if (Math.hypot(other.x - x, other.y - y) < other.r + r) return false;
+      }
+      const key = cx * 4096 + cy;
+      const bucket = taken.get(key);
+      if (bucket) bucket.push({ x, y, r }); else taken.set(key, [{ x, y, r }]);
+      return true;
+    };
+
+    for (const way of roads.ways) {
+      let carry = 60 + rand() * 80;
+      for (let k = 1; k < way.n.length; k++) {
+        const ax = roads.nodes[way.n[k - 1] * 2], ay = roads.nodes[way.n[k - 1] * 2 + 1];
+        const bx = roads.nodes[way.n[k] * 2], by = roads.nodes[way.n[k] * 2 + 1];
+        const len = Math.hypot(bx - ax, by - ay) || 1;
+        const ux = (bx - ax) / len, uy = (by - ay) / len;
+        for (; carry < len; carry += 100 + rand() * 70) {
+          const px = ax + ux * carry, py = ay + uy * carry;
+          for (const side of [-1, 1]) {
+            const roll = rand(), front = 84 + rand() * 72, depth = 80 + rand() * 70, tall = rand(), kind = rand();
+            if (roll > density) continue;
+            if (roll < 0.1 * density) {
+              const tx = px - uy * side * (way.w / 2 + 28), ty = py + ux * side * (way.w / 2 + 28);
+              if (roadClearance(index, tx, ty) > 10 && !inLake(tx, ty) && !inPlot(tx, ty, 10) && claim(tx, ty, 14)) addTree(tx * S, ty * S, 0.8 + tall * 0.8);
+              continue;
+            }
+            const off = way.w / 2 + 24 + depth / 2;
+            const cx = px - uy * side * off, cy = py + ux * side * off;
+            const radius = Math.max(front, depth) * 0.55;
+            if (cx < 40 || cy < 40 || cx > map.width - 40 || cy > map.height - 40) continue;
+            if (inLake(cx, cy) || inPlot(cx, cy, radius)) continue;
+            // The whole footprint must be clear of every road, not just the one it faces
+            let clear = true;
+            for (let i = -1; i <= 1 && clear; i++) for (let j = -1; j <= 1 && clear; j++) {
+              const sx = cx + ux * i * front / 2 - uy * j * depth / 2, sy = cy + uy * i * front / 2 + ux * j * depth / 2;
+              clear = roadClearance(index, sx, sy) >= 10;
+            }
+            if (!clear || !claim(cx, cy, radius)) continue;
+            // The old city in the south is low and crowded; it gets taller and glassier toward the lake
+            const oldCity = cy / map.height > 0.62;
+            const [style, low, high] = oldCity
+              ? (kind < 0.55 ? ["shop", 4.5, 9] as const : kind < 0.8 ? ["stone", 5, 9] as const : ["apartment", 7, 13] as const)
+              : (kind < 0.45 ? ["apartment", 8, 18] as const : kind < 0.75 ? ["shop", 5, 10] as const : ["glass", 14, 34] as const);
+            addBuilding(style, cx * S, cy * S, front * S, depth * S, low + tall * (high - low), -Math.atan2(uy, ux));
+          }
+        }
+        carry -= len;
+      }
+    }
   }
 
   private makeBeam(color: number, radius: number, height: number) {
@@ -565,7 +833,7 @@ export class RushScene {
         visual.add(lamp);
       }
       this.scene.add(visual);
-      this.traffic.push({ def, visual });
+      this.traffic.push({ def, visual, heading: 0 });
     };
     for (const bus of this.map.buses) addTraffic(bus, this.templates.bus, 6.6, 2.6);
     for (const car of this.map.cars ?? []) addTraffic(car, this.templates.cars[(car.style ?? 0) % this.templates.cars.length], 3.9, 1.7);
@@ -600,7 +868,8 @@ export class RushScene {
       ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 12; ctx.lineCap = "round"; ctx.lineJoin = "round";
       ctx.beginPath(); ctx.moveTo(14, 12); ctx.lineTo(42, 32); ctx.lineTo(14, 52); ctx.stroke();
     }, true);
-    for (let i = 0; i < 3; i++) {
+    // Enough pieces for a winding real-road route; the grid only ever needs three
+    for (let i = 0; i < 48; i++) {
       const texture = this.routeTexture.clone();
       const geo = new THREE.PlaneGeometry(1, 1);
       geo.rotateX(-Math.PI / 2);
@@ -616,9 +885,9 @@ export class RushScene {
     // Waiting passengers: a waving figure in a yellow marker beam
     const skin = new THREE.MeshStandardMaterial({ color: 0xc68642 });
     const shirts = [0xe11d48, 0x2563eb, 0x16a34a, 0xf59e0b, 0x9333ea, 0x0d9488, 0xf97316, 0xdb2777];
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 16; i++) {
       const figure = new THREE.Group();
-      const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.75, 4, 8), new THREE.MeshStandardMaterial({ color: shirts[i] }));
+      const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.75, 4, 8), new THREE.MeshStandardMaterial({ color: shirts[i % shirts.length] }));
       torso.position.y = 0.95;
       const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 10, 8), skin);
       head.position.y = 1.75;
@@ -642,7 +911,7 @@ export class RushScene {
     this.scene.add(this.destination);
 
     // Chai cups
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 16; i++) {
       const cup = new THREE.Mesh(
         new THREE.CylinderGeometry(0.42, 0.3, 0.7, 12),
         new THREE.MeshStandardMaterial({ color: 0xf5e6c8, emissive: 0xff8a1f, emissiveIntensity: 1.6 }),
@@ -741,10 +1010,13 @@ export class RushScene {
     }
 
     // Traffic
-    for (const { def, visual } of this.traffic) {
-      const p = busPosition(def, serverNow);
-      visual.position.set(p.x * S, 0, p.y * S);
-      visual.rotation.y = -p.angle;
+    for (const entry of this.traffic) {
+      const p = busPosition(entry.def, serverNow);
+      entry.visual.position.set(p.x * S, 0, p.y * S);
+      // Ease round bends; a full about-turn at the end of a route just flips
+      const turn = wrapAngle(p.angle - entry.heading);
+      entry.heading = Math.abs(turn) > 2.6 ? p.angle : wrapAngle(entry.heading + turn * Math.min(1, dt * 8));
+      entry.visual.rotation.y = -entry.heading;
     }
 
     // Pedestrians: walk each block's kerb as one loop
@@ -886,6 +1158,7 @@ export class RushScene {
   }
 
   render() {
+    this.dome.position.set(this.camera.position.x, 0, this.camera.position.z);
     if (this.composer) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
   }
