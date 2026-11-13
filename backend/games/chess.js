@@ -156,16 +156,28 @@ function maybeBotMove(io, rooms, roomId) {
   const botColor = gs.whiteId === BOT_ID ? 'w' : gs.blackId === BOT_ID ? 'b' : null;
   if (!botColor || new Chess(gs.fen).turn() !== botColor) return;
 
+  // Think straight away (in a worker thread), but never answer faster than the usual delay
   const fenAtSchedule = gs.fen;
-  setTimeout(() => {
-    // Room may have been torn down or the game ended while we waited
+  if (gs.botThinkingFen === fenAtSchedule) return; // already on it (e.g. a client re-requested state)
+  gs.botThinkingFen = fenAtSchedule;
+  const started = Date.now();
+  const stillCurrent = () => {
     const current = rooms[roomId];
-    if (!current || !current.gameState || current.gameState.status !== 'active') return;
-    if (current.gameState.fen !== fenAtSchedule) return;
+    return current && current.gameState === gs && gs.status === 'active' && gs.fen === fenAtSchedule ? current : null;
+  };
 
-    const move = pickMove(current.gameState.fen, current.difficulty);
-    if (move) applyMove(io, roomId, current, BOT_ID, move);
-  }, BOT_MOVE_DELAY_MS);
+  pickMove(fenAtSchedule, room.difficulty, Object.keys(gs.positionCounts || {}))
+    .then(move => {
+      setTimeout(() => {
+        if (gs.botThinkingFen === fenAtSchedule) gs.botThinkingFen = null;
+        const current = stillCurrent();
+        if (current && move) applyMove(io, roomId, current, BOT_ID, move);
+      }, Math.max(0, BOT_MOVE_DELAY_MS - (Date.now() - started)));
+    })
+    .catch(err => {
+      console.error('Chess bot failed to choose a move:', err);
+      if (gs.botThinkingFen === fenAtSchedule) gs.botThinkingFen = null;
+    });
 }
 
 function registerEvents(socket, io, rooms) {
